@@ -2,5 +2,4 @@
 setlocal
 set CAPTION_SEARCH_DEBUG=1
 pnpm install
-pnpm run build
-python app.py
+pnpm run run

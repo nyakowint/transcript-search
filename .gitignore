@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+data/
+node_modules/
+dist/
+ui/assets/
+ui/*.map
+*.log
+*.sqlite
+*.db
+*.sqlite3
+*.env
