@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Caption Search</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1>Caption Search</h1>
+        <p>Fetch and search YouTube transcripts for editing.</p>
+      </header>
+
+      <section class="panel">
+        <h2>Ingest videos or playlists</h2>
+        <textarea
+          id="url-input"
+          placeholder="Paste YouTube video URLs or playlist URLs (separate with spaces or new lines)."
+        ></textarea>
+        <div class="cookie-row">
+          <div class="field">
+            <label for="cookies-path">Cookies file (optional)</label>
+            <div class="input-group">
+              <input
+                id="cookies-path"
+                type="text"
+                placeholder="Paste cookies file path or browse..."
+              />
+              <button id="cookies-browse" type="button">Browse</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="cookies-browser">Cookies from browser (optional)</label>
+            <select id="cookies-browser">
+              <option value="">None</option>
+              <option value="chrome">Chrome</option>
+              <option value="edge">Edge</option>
+              <option value="firefox">Firefox</option>
+              <option value="brave">Brave</option>
+              <option value="vivaldi">Vivaldi</option>
+              <option value="opera">Opera</option>
+            </select>
+          </div>
+        </div>
+        <div class="actions">
+          <button id="ingest-button">Fetch subtitles</button>
+          <span id="status"></span>
+        </div>
+      </section>
+
+      <section class="grid">
+        <div class="panel">
+          <h2>Videos</h2>
+          <ul id="video-list" class="list"></ul>
+          <h3>Missing subtitles</h3>
+          <ul id="missing-list" class="list muted"></ul>
+        </div>
+
+        <div class="panel">
+          <h2>Transcript</h2>
+          <div id="transcript" class="transcript"></div>
+
+          <h2>Search transcripts</h2>
+          <div class="search-row">
+            <input id="search-input" type="text" placeholder="Search for a phrase" />
+            <button id="search-button">Search</button>
+          </div>
+          <div id="search-results" class="results"></div>
+        </div>
+      </section>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
