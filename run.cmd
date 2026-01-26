@@ -1,4 +1,4 @@
 @echo off
 setlocal
 pnpm install
-pnpm run run
+pnpm app

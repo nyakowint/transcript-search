@@ -18,7 +18,7 @@ def main() -> None:
     )
     api.set_window(window)
     debug = os.getenv("CAPTION_SEARCH_DEBUG", "").lower() in {"1", "true", "yes", "on"}
-    webview.start(debug=debug)
+    webview.start(debug=debug, http_server=True)
 
 
 if __name__ == "__main__":

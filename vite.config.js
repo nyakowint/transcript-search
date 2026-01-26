@@ -4,6 +4,7 @@ import path from 'node:path';
 
 export default defineConfig({
   root: 'src',
+  base: './',
   plugins: [svelte()],
   build: {
     outDir: '../ui',
