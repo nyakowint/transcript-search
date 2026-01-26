@@ -2,8 +2,8 @@
 
 ## Architecture (current plan)
 - **App type:** Local Python app (single process)
-- **GUI:** Embedded web UI via **pywebview** (HTML/JS/CSS in app window)
-- **IPC:** JS↔Python bridge (no external browser, no HTTP API)
+- **GUI:** Embedded web UI built with **Svelte + Vite** (bundled to /ui)
+- **IPC:** JS↔Python bridge via pywebview (no external browser, no HTTP API)
 - **YouTube ingestion:** yt-dlp invoked from Python
 - **Subtitles:** Prefer manual captions, fall back to auto; flag none
 - **Transcript format:** Normalize VTT to match YouTube UI (text + timestamps)
@@ -18,7 +18,6 @@
 5. Search/filter transcripts; surface summary of missing captions.
 
 ## Next steps (from plan)
-- Scaffold Python app + pywebview shell.
-- Implement input parsing and yt-dlp integration.
-- Add transcript normalization + search.
-- Add SQLite storage + summary reporting.
+- Iterate on Svelte UI components and layout.
+- Improve transcript formatting and filtering controls.
+- Package/distribute the app for easier setup.

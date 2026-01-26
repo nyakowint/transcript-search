@@ -1,4 +1,5 @@
 @echo off
 setlocal
-set CAPTION_SEARCH_DEBUG=
+pnpm install
+pnpm run build
 python app.py
