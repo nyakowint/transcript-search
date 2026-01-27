@@ -1,13 +1,12 @@
 <script>
-  import { createEventDispatcher } from 'svelte';
+  import { Search } from 'lucide-svelte';
 
-  let { searchResults = [] } = $props();
+  let { searchResults = [], onsearch } = $props();
 
-  const dispatch = createEventDispatcher();
   let query = $state('');
 
   function submit() {
-    dispatch('search', query);
+    onsearch?.({ detail: query });
   }
 
   function formatTime(ms) {
@@ -46,113 +45,160 @@
   }
 </script>
 
-<div class="panel">
-  <div class="panel-header">
-    <h2>Search transcripts</h2>
-  </div>
-  <div class="search-row">
+<div class="search-panel">
+  <div class="search-bar">
     <input
       type="text"
       bind:value={query}
-      placeholder="Search for a phrase"
-      on:keydown={(event) => event.key === 'Enter' && submit()}
+      placeholder="Search all transcripts..."
+      onkeydown={(event) => event.key === 'Enter' && submit()}
     />
-    <button class="primary" type="button" on:click={submit}>Search</button>
+    <button class="search-btn" type="button" aria-label="Search" onclick={submit}>
+      <Search size={18} />
+    </button>
   </div>
-  <div class="results">
-    {#if searchResults.length === 0}
-      <p class="empty">No matches yet.</p>
-    {:else}
+
+  {#if searchResults.length > 0}
+    <div class="results">
+      <div class="results-header">{searchResults.length} match{searchResults.length === 1 ? '' : 'es'}</div>
       {#each searchResults as result}
         <div class="result-card">
-          <div class="result-meta">
-            {result.title || result.video_id} · {result.channel || 'Unknown'}
+          <div class="result-source">
+            <span class="source-title">{result.title || result.video_id}</span>
+            <span class="source-channel">{result.channel || ''}</span>
           </div>
-          <div class="result-text">
+          <div class="result-row">
             <span class="time">{formatTime(result.start_ms)}</span>
             <span class="text">{result.text}</span>
             <div class="actions">
-              <button type="button" title="Open in browser" on:click={() => openInBrowser(result.video_id, result.start_ms)}>
+              <button type="button" title="Open in browser" onclick={() => openInBrowser(result.video_id, result.start_ms)}>
                 ↗
               </button>
-              <button type="button" title="Copy link" on:click={() => copyLink(result.video_id, result.start_ms)}>
+              <button type="button" title="Copy link" onclick={() => copyLink(result.video_id, result.start_ms)}>
                 📋
               </button>
             </div>
           </div>
         </div>
       {/each}
-    {/if}
-  </div>
+    </div>
+  {/if}
 </div>
 
 <style>
-  .panel {
-    background: #171a21;
-    border-radius: 12px;
-    padding: 16px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
-  }
-
-  .panel-header {
-    margin-bottom: 12px;
-  }
-
-  .search-row {
+  .search-panel {
+    width: 100%;
     display: flex;
-    gap: 8px;
-    margin-bottom: 12px;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
   }
 
-  .search-row input {
+  .search-bar {
+    display: flex;
+    background: var(--bg-input);
+    border: 1px solid var(--border-input);
+    border-radius: 12px;
+    overflow: hidden;
+    transition: border-color 0.15s;
+    flex-shrink: 0;
+  }
+
+  .search-bar:focus-within {
+    border-color: var(--accent);
+  }
+
+  .search-bar input {
     flex: 1;
-    padding: 8px 12px;
-    border-radius: 8px;
-    border: 1px solid #2a2f3a;
-    background: #0f1115;
-    color: #f2f2f2;
-  }
-
-  .primary {
-    background: #4c7dff;
+    padding: 14px 18px;
     border: none;
-    color: white;
-    padding: 10px 16px;
-    border-radius: 8px;
-    cursor: pointer;
+    background: transparent;
+    color: var(--text);
+    font-size: 15px;
+    outline: none;
   }
 
-  .primary:hover {
-    background: #3d6af0;
+  .search-bar input::placeholder {
+    color: var(--text-muted);
+  }
+
+  .search-btn {
+    padding: 14px 18px;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+  }
+
+  .search-btn:hover {
+    color: var(--text);
   }
 
   .results {
-    display: grid;
-    gap: 12px;
+    margin-top: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .results-header {
+    font-size: 12px;
+    color: var(--text-muted);
+    padding: 0 4px 8px;
   }
 
   .result-card {
-    background: #0f1115;
-    border: 1px solid #2a2f3a;
-    border-radius: 8px;
-    padding: 10px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    transition: border-color 0.15s;
   }
 
-  .result-meta {
-    color: #b5b9c5;
-    font-size: 12px;
+  .result-card:hover {
+    border-color: var(--border-input);
+  }
+
+  .result-source {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
     margin-bottom: 6px;
   }
 
-  .result-text {
+  .source-title {
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .source-channel {
+    color: var(--text-muted);
+    font-size: 11px;
+  }
+
+  .result-row {
     display: grid;
-    grid-template-columns: 60px 1fr auto;
-    gap: 12px;
+    grid-template-columns: 52px 1fr auto;
+    gap: 10px;
     align-items: start;
   }
 
+  .time {
+    color: var(--accent);
+    font-size: 12px;
+    font-family: "SF Mono", "Consolas", monospace;
+  }
+
   .text {
-    color: #f2f2f2;
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.5;
   }
 
   .actions {
@@ -167,25 +213,17 @@
   }
 
   .actions button {
-    background: #2a2f3a;
+    background: var(--border-input);
     border: none;
-    color: #b5b9c5;
-    font-size: 12px;
+    color: var(--text-secondary);
+    font-size: 11px;
     padding: 4px 6px;
     border-radius: 4px;
     cursor: pointer;
   }
 
   .actions button:hover {
-    background: #3a4050;
-    color: #f2f2f2;
-  }
-
-  .time {
-    color: #7aa2ff;
-  }
-
-  .empty {
-    color: #8c92a2;
+    background: var(--border);
+    color: var(--text);
   }
 </style>

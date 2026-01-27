@@ -4,6 +4,7 @@
   import SearchPanel from './components/SearchPanel.svelte';
   import VideoListPanel from './components/VideoListPanel.svelte';
   import { apiClient } from './services/api.js';
+  import { FileText, Sun, Moon, X } from 'lucide-svelte';
 
   let status = $state('');
   let statusError = $state(false);
@@ -15,6 +16,14 @@
   let transcript = $state([]);
   let searchResults = $state([]);
   let selectedVideoId = $state('');
+  let selectedVideoTitle = $state('');
+  let transcriptSidebarOpen = $state(false);
+  let darkMode = $state(true);
+  let confirmModalOpen = $state(false);
+
+  $effect(() => {
+    document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
+  });
 
   function setStatus(message, isError = false) {
     status = message;
@@ -40,6 +49,9 @@
     }
     transcript = response.segments;
     selectedVideoId = videoId;
+    const video = videos.find(v => v.id === videoId);
+    selectedVideoTitle = video?.title || videoId;
+    transcriptSidebarOpen = true;
   }
 
   async function deleteVideo(videoId) {
@@ -57,6 +69,7 @@
   }
 
   async function deleteAllVideos() {
+    confirmModalOpen = false;
     const response = await apiClient.safe(() => apiClient.deleteAllVideos());
     if (!response.ok) {
       setStatus(response.error || 'Failed to delete videos', true);
@@ -64,7 +77,9 @@
     }
     transcript = [];
     selectedVideoId = '';
+    selectedVideoTitle = '';
     searchResults = [];
+    transcriptSidebarOpen = false;
     await refreshLists();
     setStatus('All videos removed.');
   }
@@ -134,143 +149,438 @@
 </script>
 
 <div class="app">
-  <header>
-    <div>
+  <!-- Left Sidebar: Library (always visible) -->
+  <aside class="sidebar left">
+    <div class="sidebar-header">
+      <span class="sidebar-title">Library</span>
+    </div>
+    <div class="sidebar-content">
+      <div class="ingest-section">
+        <textarea
+          bind:value={urlsInput}
+          placeholder="Paste YouTube URLs or playlist links..."
+          rows="2"
+        ></textarea>
+        <CookiesPanel
+          {cookiesPath}
+          {cookiesBrowser}
+          onchange={handleCookiesChange}
+          onbrowse={handleBrowseRequest}
+        />
+        <button class="primary" onclick={ingestUrls}>Fetch subtitles</button>
+      </div>
+      <VideoListPanel
+        {videos}
+        {missing}
+        onselect={(event) => loadTranscript(event.detail)}
+        ondelete={(event) => deleteVideo(event.detail)}
+        ondeleteAll={() => confirmModalOpen = true}
+      />
+    </div>
+    {#if status}
+      <div class="sidebar-footer" class:error={statusError}>{status}</div>
+    {/if}
+  </aside>
+
+  <!-- Main Content -->
+  <main class="main">
+    <div class="top-bar">
+      <div class="top-bar-right">
+        <button class="icon-btn" class:active={transcriptSidebarOpen} title="Transcript" onclick={() => transcriptSidebarOpen = !transcriptSidebarOpen}>
+          <FileText size={18} />
+        </button>
+        <button class="icon-btn" title={darkMode ? 'Light mode' : 'Dark mode'} onclick={() => darkMode = !darkMode}>
+          {#if darkMode}
+            <Sun size={18} />
+          {:else}
+            <Moon size={18} />
+          {/if}
+        </button>
+      </div>
+    </div>
+
+    <section class="hero">
       <h1>Caption Search</h1>
-      <p>Fetch and search YouTube transcripts for editing.</p>
-    </div>
-    <div class="status" class:error={statusError}>{status}</div>
-  </header>
+      <SearchPanel {searchResults} onsearch={(event) => searchTranscripts(event.detail)} />
+    </section>
+  </main>
 
-  <section class="panel">
-    <div class="panel-header">
-      <h2>Ingest videos or playlists</h2>
-      <button class="primary" on:click={ingestUrls}>Fetch subtitles</button>
+  <!-- Right Sidebar: Transcript -->
+  <aside class="sidebar right" class:open={transcriptSidebarOpen}>
+    <div class="sidebar-header">
+      <span class="sidebar-title" title={selectedVideoTitle}>{selectedVideoTitle || 'Transcript'}</span>
+      <button class="icon-btn-sm" aria-label="Close transcript" onclick={() => transcriptSidebarOpen = false}>
+        <X size={16} />
+      </button>
     </div>
-    <textarea
-      bind:value={urlsInput}
-      placeholder="Paste YouTube video URLs or playlist URLs (separate with spaces or new lines)."
-    ></textarea>
-    <CookiesPanel
-      {cookiesPath}
-      {cookiesBrowser}
-      on:change={handleCookiesChange}
-      on:browse={handleBrowseRequest}
-    />
-  </section>
-
-  <section class="grid">
-    <VideoListPanel
-      {videos}
-      {missing}
-      on:select={(event) => loadTranscript(event.detail)}
-      on:delete={(event) => deleteVideo(event.detail)}
-      on:deleteAll={deleteAllVideos}
-    />
-    <div class="stack">
+    <div class="sidebar-content">
       <TranscriptPanel {transcript} videoId={selectedVideoId} />
-      <SearchPanel {searchResults} on:search={(event) => searchTranscripts(event.detail)} />
     </div>
-  </section>
+  </aside>
+
+  <!-- Confirmation Modal -->
+  {#if confirmModalOpen}
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <div class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="-1" onclick={() => confirmModalOpen = false} onkeydown={(e) => e.key === 'Escape' && (confirmModalOpen = false)}>
+      <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+      <div class="modal" role="document" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
+        <h3 id="modal-title">Clear all videos?</h3>
+        <p>This will remove all {videos.length} videos and their transcripts. This cannot be undone.</p>
+        <div class="modal-actions">
+          <button class="secondary" onclick={() => confirmModalOpen = false}>Cancel</button>
+          <button class="danger" onclick={deleteAllVideos}>Clear all</button>
+        </div>
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
+  :global(:root) {
+    --bg-base: #0a0c0f;
+    --bg-elevated: #12151a;
+    --bg-panel: #12151a;
+    --bg-input: #12151a;
+    --bg-sidebar: #0d0f13;
+    --border: #1f242d;
+    --border-input: #252a35;
+    --text: #f2f2f2;
+    --text-muted: #6b7280;
+    --text-secondary: #9ca3af;
+    --accent: #3b6cff;
+    --accent-hover: #2d5bef;
+    --error: #ff8a8a;
+    --scrollbar-track: transparent;
+    --scrollbar-thumb: #3a3f4a;
+    --scrollbar-thumb-hover: #4a5060;
+    --sidebar-width: 360px;
+  }
+
+  :global([data-theme="light"]) {
+    --bg-base: #f5f5f7;
+    --bg-elevated: #ffffff;
+    --bg-panel: #ffffff;
+    --bg-input: #f0f0f2;
+    --bg-sidebar: #ffffff;
+    --border: #d1d5db;
+    --border-input: #c5c9d0;
+    --text: #1f2937;
+    --text-muted: #6b7280;
+    --text-secondary: #4b5563;
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --error: #dc2626;
+    --scrollbar-track: transparent;
+    --scrollbar-thumb: #c5c9d0;
+    --scrollbar-thumb-hover: #9ca3af;
+  }
+
   :global(body) {
     margin: 0;
     font-family: "Segoe UI", system-ui, sans-serif;
-    background: #0f1115;
-    color: #f2f2f2;
+    background: var(--bg-base);
+    color: var(--text);
+  }
+
+  :global(*, *::before, *::after) {
+    box-sizing: border-box;
+  }
+
+  :global(*::-webkit-scrollbar) {
+    width: 8px;
+    height: 8px;
+  }
+
+  :global(*::-webkit-scrollbar-track) {
+    background: var(--scrollbar-track);
+  }
+
+  :global(*::-webkit-scrollbar-thumb) {
+    background: var(--scrollbar-thumb);
+    border-radius: 4px;
+  }
+
+  :global(*::-webkit-scrollbar-thumb:hover) {
+    background: var(--scrollbar-thumb-hover);
   }
 
   .app {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 24px;
+    height: 100vh;
+    display: flex;
+    overflow: hidden;
+  }
+
+  /* Sidebars */
+  .sidebar {
+    width: var(--sidebar-width);
+    background: var(--bg-sidebar);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+  }
+
+  .sidebar.left {
+    position: relative;
+  }
+
+  .sidebar.right {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    right: 0;
+    border-right: none;
+    border-left: 1px solid var(--border);
+    transform: translateX(100%);
+    transition: transform 0.2s ease;
+    z-index: 20;
+  }
+
+  .sidebar.right.open {
+    transform: translateX(0);
+  }
+
+  .sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .sidebar-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .sidebar-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
     display: flex;
     flex-direction: column;
     gap: 16px;
   }
 
-  header {
+  .sidebar-footer {
+    padding: 10px 16px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .sidebar-footer.error {
+    color: var(--error);
+  }
+
+  .ingest-section {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
+    flex-direction: column;
+    gap: 10px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
   }
 
-  header p {
-    margin: 4px 0 0;
-    color: #b5b9c5;
-  }
-
-  .status {
-    font-size: 14px;
-    color: #cfd4e6;
-  }
-
-  .status.error {
-    color: #ff8a8a;
-  }
-
-  .panel {
-    background: #171a21;
-    border-radius: 12px;
-    padding: 16px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
-    display: grid;
-    gap: 12px;
-  }
-
-  .panel-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-  }
-
-  textarea {
+  .ingest-section textarea {
     width: 100%;
-    min-height: 120px;
-    background: #0f1115;
-    border: 1px solid #2a2f3a;
-    color: #f2f2f2;
-    padding: 12px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-input);
+    color: var(--text);
+    padding: 10px 12px;
     border-radius: 8px;
-    resize: vertical;
+    resize: none;
+    font-size: 13px;
+    line-height: 1.4;
   }
 
+  .ingest-section textarea::placeholder {
+    color: var(--text-muted);
+  }
+
+  /* Main content */
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    position: relative;
+  }
+
+  .top-bar {
+    position: absolute;
+    top: 12px;
+    right: 16px;
+    display: flex;
+    justify-content: flex-end;
+    z-index: 10;
+  }
+
+  .top-bar-right {
+    display: flex;
+    gap: 8px;
+  }
+
+  .icon-btn {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    padding: 8px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .icon-btn:hover {
+    color: var(--text);
+    border-color: var(--border-input);
+  }
+
+  .icon-btn.active {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .icon-btn-sm {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    padding: 4px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .icon-btn-sm:hover {
+    color: var(--text);
+    background: var(--border);
+  }
+
+  .hero {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 80px 24px 32px;
+    overflow: hidden;
+  }
+
+  .hero h1 {
+    font-size: 28px;
+    font-weight: 600;
+    margin: 0 0 24px;
+    color: var(--text);
+    letter-spacing: -0.5px;
+    flex-shrink: 0;
+  }
+
+  .hero :global(.search-panel) {
+    width: 100%;
+    max-width: 700px;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Buttons */
   .primary {
-    background: #4c7dff;
+    background: var(--accent);
     border: none;
     color: white;
     padding: 10px 16px;
     border-radius: 8px;
     cursor: pointer;
+    font-weight: 500;
+    font-size: 13px;
   }
 
   .primary:hover {
-    background: #3d6af0;
+    background: var(--accent-hover);
   }
 
-  .grid {
-    display: grid;
-    grid-template-columns: 1fr 1.4fr;
-    gap: 16px;
+  .secondary {
+    background: var(--bg-input);
+    border: 1px solid var(--border-input);
+    color: var(--text);
+    padding: 10px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
   }
 
-  .stack {
-    display: grid;
-    gap: 16px;
+  .secondary:hover {
+    background: var(--border);
   }
 
-  @media (max-width: 960px) {
-    header {
-      flex-direction: column;
-      align-items: flex-start;
-    }
+  .danger {
+    background: #dc2626;
+    border: none;
+    color: white;
+    padding: 10px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 13px;
+  }
 
-    .grid {
-      grid-template-columns: 1fr;
+  .danger:hover {
+    background: #b91c1c;
+  }
+
+  /* Modal */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+  }
+
+  .modal {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    max-width: 400px;
+    width: 90%;
+  }
+
+  .modal h3 {
+    margin: 0 0 12px;
+    font-size: 16px;
+    color: var(--text);
+  }
+
+  .modal p {
+    margin: 0 0 20px;
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+  }
+
+  .modal-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+  }
+
+  @media (max-width: 600px) {
+    .sidebar {
+      width: 100%;
     }
   }
 </style>

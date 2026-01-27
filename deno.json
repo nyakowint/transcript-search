@@ -1,14 +1,16 @@
 {
   "tasks": {
     "app": "deno task build && python app.py",
-    "dev": "deno run -A npm:vite",
+    "dev": "deno run -A npm:vite dev --port ",
     "build": "deno run -A npm:vite build",
+    "build:exe": "deno task build && pyinstaller caption-search.spec --distpath build/app --workpath build/pyinstaller",
     "preview": "deno run -A npm:vite preview"
   },
   "imports": {
     "vite": "npm:vite@^6.0.0",
     "svelte": "npm:svelte@^5.48.2",
-    "@sveltejs/vite-plugin-svelte": "npm:@sveltejs/vite-plugin-svelte@^6.2.4"
+    "@sveltejs/vite-plugin-svelte": "npm:@sveltejs/vite-plugin-svelte@^6.2.4",
+    "lucide-svelte": "npm:lucide-svelte@^0.469.0"
   },
   "nodeModulesDir": "auto"
 }
