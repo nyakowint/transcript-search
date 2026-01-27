@@ -1,4 +1,3 @@
 @echo off
 setlocal
-pnpm install
-pnpm app
+pnpm install && pnpm app

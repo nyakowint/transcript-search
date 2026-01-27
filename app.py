@@ -1,4 +1,4 @@
-import os
+import sys
 from pathlib import Path
 
 import webview
@@ -17,7 +17,8 @@ def main() -> None:
         height=800,
     )
     api.set_window(window)
-    debug = os.getenv("CAPTION_SEARCH_DEBUG", "").lower() in {"1", "true", "yes", "on"}
+    debug = "--debug" in sys.argv
+    webview.settings["SHOW_DEFAULT_MENUS"] = debug
     webview.start(debug=debug, http_server=True)
 
 

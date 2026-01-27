@@ -1,5 +1,3 @@
 @echo off
 setlocal
-set CAPTION_SEARCH_DEBUG=1
-pnpm install
-pnpm app
+pnpm install && pnpm app -- --debug
