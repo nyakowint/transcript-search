@@ -1,2 +1,1 @@
 pywebview
-yt-dlp

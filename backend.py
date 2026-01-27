@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import glob
 import html
+import json
 import os
 import re
 import sqlite3
+import subprocess
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Optional
 
-from yt_dlp import YoutubeDL
-from yt_dlp.utils import DownloadError
+from ytdlp_manager import get_ytdlp_path
 
 TIME_RANGE_RE = re.compile(
     r"(?P<start>\d{1,2}:\d{2}:\d{2}\.\d{3}|\d{1,2}:\d{2}\.\d{3})\s*-->\s*"
@@ -398,6 +399,7 @@ class Api:
         self._store = CaptionStore(self._data_dir / "captions.db")
         self._window = None
         self._serializable = False
+        self._ytdlp = str(get_ytdlp_path())
 
     def set_window(self, window) -> None:
         self._window = window
@@ -444,7 +446,7 @@ class Api:
             return {"ok": False, "error": f"Cookies file not found: {cookies_path}"}
         try:
             expanded_urls = self._expand_urls(urls, cookies_path, cookies_browser)
-        except DownloadError as exc:
+        except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
             return {"ok": False, "error": str(exc)}
         processed: list[dict] = []
         missing: list[dict] = []
@@ -456,7 +458,7 @@ class Api:
             seen.add(url)
             try:
                 video = self._process_video(url, cookies_path, cookies_browser)
-            except (DownloadError, FileNotFoundError, ValueError) as exc:
+            except (subprocess.CalledProcessError, json.JSONDecodeError, FileNotFoundError, ValueError) as exc:
                 errors.append({"url": url, "error": str(exc)})
                 continue
             processed.append(video)
@@ -484,15 +486,15 @@ class Api:
         self._store.delete_all_videos()
         return {"ok": True}
 
-    def _base_ydl_opts(
+    def _base_ytdlp_args(
         self, cookies_path: Optional[str], cookies_browser: Optional[str]
-    ) -> dict:
-        opts = {"quiet": True, "skip_download": True, "no_warnings": True}
+    ) -> list[str]:
+        args = [self._ytdlp, "--no-warnings", "-q"]
         if cookies_path:
-            opts["cookiefile"] = cookies_path
+            args.extend(["--cookies", cookies_path])
         if cookies_browser:
-            opts["cookiesfrombrowser"] = (cookies_browser,)
-        return opts
+            args.extend(["--cookies-from-browser", cookies_browser])
+        return args
 
     def _normalize_path(self, raw_path: str) -> str:
         if not raw_path:
@@ -516,19 +518,21 @@ class Api:
         cookies_browser: Optional[str],
     ) -> list[str]:
         expanded: list[str] = []
-        opts = self._base_ydl_opts(cookies_path, cookies_browser)
-        opts["extract_flat"] = "in_playlist"
-        with YoutubeDL(opts) as ydl:
-            for url in urls:
-                info = ydl.extract_info(url, download=False)
-                if info.get("_type") in {"playlist", "multi_video"}:
-                    entries = info.get("entries") or []
-                    for entry in entries:
-                        entry_url = self._entry_to_url(entry)
-                        if entry_url:
-                            expanded.append(entry_url)
-                else:
-                    expanded.append(info.get("webpage_url") or url)
+        base_args = self._base_ytdlp_args(cookies_path, cookies_browser)
+        for url in urls:
+            args = base_args + ["--flat-playlist", "-J", url]
+            result = subprocess.run(args, capture_output=True, text=True, timeout=120)
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr or f"yt-dlp failed for {url}")
+            info = json.loads(result.stdout)
+            if info.get("_type") in {"playlist", "multi_video"}:
+                entries = info.get("entries") or []
+                for entry in entries:
+                    entry_url = self._entry_to_url(entry)
+                    if entry_url:
+                        expanded.append(entry_url)
+            else:
+                expanded.append(info.get("webpage_url") or url)
         return expanded
 
     def _entry_to_url(self, entry: dict) -> Optional[str]:
@@ -587,9 +591,13 @@ class Api:
     def _extract_video_info(
         self, url: str, cookies_path: Optional[str], cookies_browser: Optional[str]
     ) -> dict:
-        opts = self._base_ydl_opts(cookies_path, cookies_browser)
-        with YoutubeDL(opts) as ydl:
-            return ydl.extract_info(url, download=False)
+        args = self._base_ytdlp_args(cookies_path, cookies_browser) + [
+            "--skip-download", "-J", url
+        ]
+        result = subprocess.run(args, capture_output=True, text=True, timeout=120)
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr or f"yt-dlp failed for {url}")
+        return json.loads(result.stdout)
 
     def _download_subtitles(
         self,
@@ -602,18 +610,22 @@ class Api:
     ) -> str:
         with tempfile.TemporaryDirectory() as temp_dir:
             outtmpl = os.path.join(temp_dir, "%(id)s.%(ext)s")
-            opts = self._base_ydl_opts(cookies_path, cookies_browser)
-            opts.update(
-                {
-                    "writesubtitles": subtitle_type == "manual",
-                    "writeautomaticsub": subtitle_type == "auto",
-                    "subtitleslangs": [language],
-                    "subtitlesformat": "vtt",
-                    "outtmpl": outtmpl,
-                }
-            )
-            with YoutubeDL(opts) as ydl:
-                ydl.download([url])
+            args = self._base_ytdlp_args(cookies_path, cookies_browser) + [
+                "--skip-download",
+                "--sub-lang", language,
+                "--sub-format", "vtt",
+                "-o", outtmpl,
+            ]
+            if subtitle_type == "manual":
+                args.append("--write-sub")
+            else:
+                args.append("--write-auto-sub")
+            args.append(url)
+            
+            result = subprocess.run(args, capture_output=True, text=True, timeout=120)
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr or f"yt-dlp subtitle download failed for {url}")
+            
             candidates = glob.glob(os.path.join(temp_dir, f"{video_id}*.vtt"))
             if not candidates:
                 raise FileNotFoundError(f"Subtitle file not found for {video_id}.")

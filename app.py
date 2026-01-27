@@ -4,9 +4,13 @@ from pathlib import Path
 import webview
 
 from backend import Api
+from ytdlp_manager import ensure_ytdlp
 
 
 def main() -> None:
+    # Ensure yt-dlp is available before starting
+    ensure_ytdlp()
+    
     ui_path = "build/index.html"
     api = Api()
     window = webview.create_window(
