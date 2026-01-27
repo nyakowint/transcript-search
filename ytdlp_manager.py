@@ -13,6 +13,11 @@ GITHUB_RELEASES_URL = "https://api.github.com/repos/yt-dlp/yt-dlp/releases/lates
 DOWNLOAD_URL = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe"
 UPDATE_CHECK_INTERVAL_HOURS = 24
 
+# Hide console windows on Windows when running subprocess
+_SUBPROCESS_FLAGS = (
+    getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+)
+
 
 def get_data_dir() -> Path:
     """Get the data directory (next to exe when frozen, next to script otherwise)."""
@@ -42,6 +47,7 @@ def get_local_version() -> str | None:
             capture_output=True,
             text=True,
             timeout=10,
+            creationflags=_SUBPROCESS_FLAGS,
         )
         return result.stdout.strip() if result.returncode == 0 else None
     except Exception:

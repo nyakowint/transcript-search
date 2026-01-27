@@ -7,10 +7,16 @@ import os
 import re
 import sqlite3
 import subprocess
+import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Optional
+
+# Hide console windows on Windows when running subprocess
+_SUBPROCESS_FLAGS = (
+    getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+)
 
 from ytdlp_manager import get_ytdlp_path
 
@@ -521,7 +527,9 @@ class Api:
         base_args = self._base_ytdlp_args(cookies_path, cookies_browser)
         for url in urls:
             args = base_args + ["--flat-playlist", "-J", url]
-            result = subprocess.run(args, capture_output=True, text=True, timeout=120)
+            result = subprocess.run(
+                args, capture_output=True, text=True, timeout=120, creationflags=_SUBPROCESS_FLAGS
+            )
             if result.returncode != 0:
                 raise RuntimeError(result.stderr or f"yt-dlp failed for {url}")
             info = json.loads(result.stdout)
@@ -594,7 +602,9 @@ class Api:
         args = self._base_ytdlp_args(cookies_path, cookies_browser) + [
             "--skip-download", "-J", url
         ]
-        result = subprocess.run(args, capture_output=True, text=True, timeout=120)
+        result = subprocess.run(
+            args, capture_output=True, text=True, timeout=120, creationflags=_SUBPROCESS_FLAGS
+        )
         if result.returncode != 0:
             raise RuntimeError(result.stderr or f"yt-dlp failed for {url}")
         return json.loads(result.stdout)
@@ -622,7 +632,9 @@ class Api:
                 args.append("--write-auto-sub")
             args.append(url)
             
-            result = subprocess.run(args, capture_output=True, text=True, timeout=120)
+            result = subprocess.run(
+                args, capture_output=True, text=True, timeout=120, creationflags=_SUBPROCESS_FLAGS
+            )
             if result.returncode != 0:
                 raise RuntimeError(result.stderr or f"yt-dlp subtitle download failed for {url}")
             
