@@ -10,10 +10,10 @@ ui/style-*.css
 ui/index.html
 ui/
 *.log
+AGENTS.md
 *.sqlite
 *.db
 *.sqlite3
 *.env
 .pytest_cache/
 build/
-/AGENTS.md

@@ -21,3 +21,6 @@
 - Iterate on Svelte UI components and layout.
 - Improve transcript formatting and filtering controls.
 - Package/distribute the app for easier setup.
+
+## Conventions
+- If corrected, you should remember the preferred syntax or other conventions
