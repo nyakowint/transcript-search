@@ -15,5 +15,6 @@ AGENTS.md
 *.db
 *.sqlite3
 *.env
+.venv/
 .pytest_cache/
 build/

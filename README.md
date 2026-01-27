@@ -15,6 +15,10 @@ If you use VRCVideoCacher or another program that already stores cookies in this
 
 -----
 
+For windows grab the build artifact (need to be signed in) or the latest release
+
+For macos/linux you should build it yourself lol its simple
+
 ## build from src
 
 - **Python 3.10+**

@@ -33,10 +33,10 @@ jobs:
         run: deno task build
 
       - name: Build executable
-        run: pyinstaller caption-search.spec
+        run: pyinstaller caption-search.spec --noconfirm
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: caption-search-windows
-          path: dist/caption-search/
+          path: build/app/caption-search/

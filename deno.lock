@@ -2,6 +2,7 @@
   "version": "5",
   "specifiers": {
     "npm:@sveltejs/vite-plugin-svelte@^6.2.4": "6.2.4_svelte@5.48.3__acorn@8.15.0_vite@6.4.1__picomatch@4.0.3",
+    "npm:lucide-svelte@0.469": "0.469.0_svelte@5.48.3__acorn@8.15.0",
     "npm:svelte@^5.48.2": "5.48.3_acorn@8.15.0",
     "npm:vite@*": "6.4.1_picomatch@4.0.3",
     "npm:vite@6": "6.4.1_picomatch@4.0.3"
@@ -403,6 +404,12 @@
     "locate-character@3.0.0": {
       "integrity": "sha512-SW13ws7BjaeJ6p7Q6CO2nchbYEc3X3J6WrmTTDto7yMPqVSZTUyY5Tjbid+Ab8gLnATtygYtiDIJGQRRn2ZOiA=="
     },
+    "lucide-svelte@0.469.0_svelte@5.48.3__acorn@8.15.0": {
+      "integrity": "sha512-PMIJ8jrFqVUsXJz4d1yfAQplaGhNOahwwkzbunha8DhpiD73xqX24n8dE1dPpUk3vcrdWVsHc1y/liHHotOnGQ==",
+      "dependencies": [
+        "svelte"
+      ]
+    },
     "magic-string@0.30.21": {
       "integrity": "sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==",
       "dependencies": [
@@ -526,6 +533,7 @@
   "workspace": {
     "dependencies": [
       "npm:@sveltejs/vite-plugin-svelte@^6.2.4",
+      "npm:lucide-svelte@0.469",
       "npm:svelte@^5.48.2",
       "npm:vite@6"
     ]
