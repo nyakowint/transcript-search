@@ -21,6 +21,29 @@
     }
     return `${minutes}:${padded(seconds)}`;
   }
+
+  function getTimestampUrl(videoId, ms) {
+    const seconds = Math.floor(ms / 1000);
+    return `https://www.youtube.com/watch?v=${videoId}&t=${seconds}s`;
+  }
+
+  function openInBrowser(videoId, ms) {
+    window.open(getTimestampUrl(videoId, ms), '_blank');
+  }
+
+  async function copyLink(videoId, ms) {
+    try {
+      await navigator.clipboard.writeText(getTimestampUrl(videoId, ms));
+    } catch {
+      const url = getTimestampUrl(videoId, ms);
+      const textArea = document.createElement('textarea');
+      textArea.value = url;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+    }
+  }
 </script>
 
 <div class="panel">
@@ -47,7 +70,15 @@
           </div>
           <div class="result-text">
             <span class="time">{formatTime(result.start_ms)}</span>
-            <span>{result.text}</span>
+            <span class="text">{result.text}</span>
+            <div class="actions">
+              <button type="button" title="Open in browser" on:click={() => openInBrowser(result.video_id, result.start_ms)}>
+                ↗
+              </button>
+              <button type="button" title="Copy link" on:click={() => copyLink(result.video_id, result.start_ms)}>
+                📋
+              </button>
+            </div>
           </div>
         </div>
       {/each}
@@ -115,8 +146,39 @@
 
   .result-text {
     display: grid;
-    grid-template-columns: 60px 1fr;
+    grid-template-columns: 60px 1fr auto;
     gap: 12px;
+    align-items: start;
+  }
+
+  .text {
+    color: #f2f2f2;
+  }
+
+  .actions {
+    display: flex;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+
+  .result-card:hover .actions {
+    opacity: 1;
+  }
+
+  .actions button {
+    background: #2a2f3a;
+    border: none;
+    color: #b5b9c5;
+    font-size: 12px;
+    padding: 4px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .actions button:hover {
+    background: #3a4050;
+    color: #f2f2f2;
   }
 
   .time {

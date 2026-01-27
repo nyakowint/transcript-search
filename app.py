@@ -7,11 +7,11 @@ from backend import Api
 
 
 def main() -> None:
-    ui_path = Path(__file__).resolve().parent / "ui" / "index.html"
+    ui_path = "build/index.html"
     api = Api()
     window = webview.create_window(
         "Caption Search",
-        url=ui_path.as_uri(),
+        url=ui_path,
         js_api=api,
         width=1200,
         height=800,
@@ -19,7 +19,7 @@ def main() -> None:
     api.set_window(window)
     debug = "--debug" in sys.argv
     webview.settings["SHOW_DEFAULT_MENUS"] = debug
-    webview.start(debug=debug, http_server=True, private_mode=not debug)
+    webview.start(debug=debug, http_server=True)
 
 
 if __name__ == "__main__":

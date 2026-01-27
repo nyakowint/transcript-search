@@ -68,4 +68,12 @@ export const apiClient = {
     const api = await waitForApi();
     return api.select_cookies_file();
   },
+  async deleteVideo(videoId) {
+    const api = await waitForApi();
+    return api.delete_video(videoId);
+  },
+  async deleteAllVideos() {
+    const api = await waitForApi();
+    return api.delete_all_videos();
+  },
 };

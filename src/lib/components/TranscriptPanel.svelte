@@ -1,5 +1,5 @@
 <script>
-  let { transcript = [] } = $props();
+  let { transcript = [], videoId = '', sourceUrl = '' } = $props();
 
   function formatTime(ms) {
     const totalSeconds = Math.floor(ms / 1000);
@@ -11,6 +11,30 @@
       return `${hours}:${padded(minutes)}:${padded(seconds)}`;
     }
     return `${minutes}:${padded(seconds)}`;
+  }
+
+  function getTimestampUrl(ms) {
+    const seconds = Math.floor(ms / 1000);
+    return `https://www.youtube.com/watch?v=${videoId}&t=${seconds}s`;
+  }
+
+  function openInBrowser(ms) {
+    window.open(getTimestampUrl(ms), '_blank');
+  }
+
+  async function copyLink(ms) {
+    try {
+      await navigator.clipboard.writeText(getTimestampUrl(ms));
+    } catch {
+      // Fallback for older browsers
+      const url = getTimestampUrl(ms);
+      const textArea = document.createElement('textarea');
+      textArea.value = url;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+    }
   }
 </script>
 
@@ -26,7 +50,15 @@
       {#each transcript as segment}
         <div class="segment">
           <span class="time">{formatTime(segment.start_ms)}</span>
-          <span>{segment.text}</span>
+          <span class="text">{segment.text}</span>
+          <div class="actions">
+            <button type="button" title="Open in browser" on:click={() => openInBrowser(segment.start_ms)}>
+              ↗
+            </button>
+            <button type="button" title="Copy link" on:click={() => copyLink(segment.start_ms)}>
+              📋
+            </button>
+          </div>
         </div>
       {/each}
     {/if}
@@ -64,14 +96,45 @@
 
   .segment {
     display: grid;
-    grid-template-columns: 60px 1fr;
+    grid-template-columns: 60px 1fr auto;
     gap: 12px;
     padding: 6px 0;
     border-bottom: 1px solid #1f232b;
+    align-items: start;
   }
 
   .time {
     color: #7aa2ff;
+  }
+
+  .text {
+    color: #f2f2f2;
+  }
+
+  .actions {
+    display: flex;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+
+  .segment:hover .actions {
+    opacity: 1;
+  }
+
+  .actions button {
+    background: #2a2f3a;
+    border: none;
+    color: #b5b9c5;
+    font-size: 12px;
+    padding: 4px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .actions button:hover {
+    background: #3a4050;
+    color: #f2f2f2;
   }
 
   .empty {

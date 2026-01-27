@@ -89,32 +89,102 @@ def parse_vtt(content: str) -> list[dict]:
 
 
 def _dedupe_segments(segments: list[dict]) -> list[dict]:
+    """Deduplicate VTT segments to match YouTube's transcript display.
+
+    YouTube auto-generated captions have a rolling pattern:
+    - Short (10ms) segments with just new words
+    - Longer segments with accumulated text that overlap subsequent short ones
+
+    We keep only the "accumulated" segments (longer duration, more text) and
+    skip the short snippet segments whose text is contained in a nearby segment.
+    Then we trim/merge overlapping segments to remove rolling duplicates.
+    """
     if not segments:
         return []
-    sorted_segments = sorted(
-        segments, key=lambda s: (s["start_ms"], s["end_ms"], len(s["text"]))
-    )
+
+    sorted_segments = sorted(segments, key=lambda s: (s["start_ms"], s["end_ms"]))
+
+    # First pass: for segments with same start_ms, keep only the longest text
+    by_start: dict[int, dict] = {}
+    for seg in sorted_segments:
+        start = seg["start_ms"]
+        if start not in by_start or len(seg["text"]) > len(by_start[start]["text"]):
+            by_start[start] = seg
+
+    candidates = sorted(by_start.values(), key=lambda s: s["start_ms"])
+
+    # Second pass: remove short "snippet" segments whose text is a prefix of
+    # the next segment's text (the rolling caption pattern)
+    filtered: list[dict] = []
+    i = 0
+    while i < len(candidates):
+        current = candidates[i]
+        duration = current["end_ms"] - current["start_ms"]
+
+        # Check if this is a short snippet that should be skipped
+        if duration <= 50 and i + 1 < len(candidates):
+            next_seg = candidates[i + 1]
+            # Skip if next segment starts soon and contains our text
+            if (
+                next_seg["start_ms"] - current["end_ms"] <= 100
+                and current["text"] in next_seg["text"]
+            ):
+                i += 1
+                continue
+
+        filtered.append(current)
+        i += 1
+
+    # Third pass: trim overlapping prefixes and merge short continuations
+    def _tokenize(text: str) -> list[str]:
+        return text.split()
+
+    def _overlap(prev_text: str, curr_text: str) -> int:
+        prev_words = _tokenize(prev_text)
+        curr_words = _tokenize(curr_text)
+        max_len = min(len(prev_words), len(curr_words))
+        for size in range(max_len, 0, -1):
+            if prev_words[-size:] == curr_words[:size]:
+                return size
+        return 0
+
     deduped: list[dict] = []
-    current_start: Optional[int] = None
-    best: Optional[dict] = None
-    for segment in sorted_segments:
-        start_ms = segment["start_ms"]
-        if current_start is None or start_ms != current_start:
-            if best:
-                deduped.append(best)
-            current_start = start_ms
-            best = segment
+    for seg in filtered:
+        if not deduped:
+            deduped.append(seg)
             continue
-        if best is None:
-            best = segment
+
+        prev = deduped[-1]
+        if seg["start_ms"] - prev["end_ms"] > 1000:
+            deduped.append(seg)
             continue
-        if len(segment["text"]) > len(best["text"]) or (
-            len(segment["text"]) == len(best["text"])
-            and segment["end_ms"] > best["end_ms"]
-        ):
-            best = segment
-    if best:
-        deduped.append(best)
+
+        if seg["text"] in prev["text"]:
+            continue
+
+        overlap_words = _overlap(prev["text"], seg["text"])
+        if overlap_words:
+            curr_words = _tokenize(seg["text"])
+            trimmed_words = curr_words[overlap_words:]
+            if not trimmed_words:
+                continue
+            trimmed_text = " ".join(trimmed_words)
+            overlap_ratio = overlap_words / max(1, len(curr_words))
+            if len(trimmed_words) <= 3 or overlap_ratio >= 0.6:
+                prev["text"] = f"{prev['text']} {trimmed_text}".strip()
+                prev["end_ms"] = max(prev["end_ms"], seg["end_ms"])
+            else:
+                deduped.append(
+                    {
+                        "start_ms": seg["start_ms"],
+                        "end_ms": seg["end_ms"],
+                        "text": trimmed_text,
+                    }
+                )
+            continue
+
+        deduped.append(seg)
+
     return deduped
 
 
@@ -285,6 +355,20 @@ class CaptionStore:
         conn.close()
         return [dict(row) for row in rows]
 
+    def delete_video(self, video_id: str) -> None:
+        conn = self._connect()
+        with conn:
+            conn.execute("DELETE FROM transcript_segments WHERE video_id = ?", (video_id,))
+            conn.execute("DELETE FROM videos WHERE id = ?", (video_id,))
+        conn.close()
+
+    def delete_all_videos(self) -> None:
+        conn = self._connect()
+        with conn:
+            conn.execute("DELETE FROM transcript_segments")
+            conn.execute("DELETE FROM videos")
+        conn.close()
+
     def get_setting(self, key: str) -> str:
         conn = self._connect()
         row = conn.execute(
@@ -391,6 +475,14 @@ class Api:
 
     def get_missing_subtitles(self) -> dict:
         return {"ok": True, "videos": self._store.get_missing_subtitles()}
+
+    def delete_video(self, video_id: str) -> dict:
+        self._store.delete_video(video_id)
+        return {"ok": True}
+
+    def delete_all_videos(self) -> dict:
+        self._store.delete_all_videos()
+        return {"ok": True}
 
     def _base_ydl_opts(
         self, cookies_path: Optional[str], cookies_browser: Optional[str]

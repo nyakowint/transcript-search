@@ -14,6 +14,7 @@
   let missing = $state([]);
   let transcript = $state([]);
   let searchResults = $state([]);
+  let selectedVideoId = $state('');
 
   function setStatus(message, isError = false) {
     status = message;
@@ -38,6 +39,34 @@
       return;
     }
     transcript = response.segments;
+    selectedVideoId = videoId;
+  }
+
+  async function deleteVideo(videoId) {
+    const response = await apiClient.safe(() => apiClient.deleteVideo(videoId));
+    if (!response.ok) {
+      setStatus(response.error || 'Failed to delete video', true);
+      return;
+    }
+    if (selectedVideoId === videoId) {
+      transcript = [];
+      selectedVideoId = '';
+    }
+    await refreshLists();
+    setStatus('Video removed.');
+  }
+
+  async function deleteAllVideos() {
+    const response = await apiClient.safe(() => apiClient.deleteAllVideos());
+    if (!response.ok) {
+      setStatus(response.error || 'Failed to delete videos', true);
+      return;
+    }
+    transcript = [];
+    selectedVideoId = '';
+    searchResults = [];
+    await refreshLists();
+    setStatus('All videos removed.');
   }
 
   async function ingestUrls() {
@@ -131,9 +160,15 @@
   </section>
 
   <section class="grid">
-    <VideoListPanel {videos} {missing} on:select={(event) => loadTranscript(event.detail)} />
+    <VideoListPanel
+      {videos}
+      {missing}
+      on:select={(event) => loadTranscript(event.detail)}
+      on:delete={(event) => deleteVideo(event.detail)}
+      on:deleteAll={deleteAllVideos}
+    />
     <div class="stack">
-      <TranscriptPanel {transcript} />
+      <TranscriptPanel {transcript} videoId={selectedVideoId} />
       <SearchPanel {searchResults} on:search={(event) => searchTranscripts(event.detail)} />
     </div>
   </section>
