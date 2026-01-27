@@ -33,7 +33,7 @@ jobs:
         run: deno task build
 
       - name: Build executable
-        run: pyinstaller caption-search.spec --noconfirm
+        run: pyinstaller caption-search.spec --distpath build/app --workpath build/pyinstaller --noconfirm
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

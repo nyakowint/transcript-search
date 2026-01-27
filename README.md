@@ -1,17 +1,13 @@
-# Caption Search
+# Transcript Search
 
-Youtube caption fetcher + searcher...
+Youtube captions/transcript fetcher + searcher...
 
-## Prereqs
+## Usage
 
-- FFmpeg must be in your PATH
-- yt-dlp is downloaded on first run 
-
-
-You'll need to provide cookies to yt-dlp, see https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp
-In the app's ui you can browse for a cookies file or grab cookies from a browser
-
-If you use VRCVideoCacher or another program that already stores cookies in this way you can just use that same file
+- yt-dlp gets downloaded on first run & update checked if 24hrs have passed since last run
+- You will need to provide cookies to yt-dlp, see https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp
+  - You can browse for a cookies file or grab cookies from a browser
+  - If you use VRCVideoCacher or another program that already stores cookies in this way you can just use that same file
 
 -----
 
