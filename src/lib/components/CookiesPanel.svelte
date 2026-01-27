@@ -1,9 +1,5 @@
 <script>
-  import { createEventDispatcher } from 'svelte';
-
-  let { cookiesPath = '', cookiesBrowser = '' } = $props();
-
-  const dispatch = createEventDispatcher();
+  let { cookiesPath = '', cookiesBrowser = '', onchange, onbrowse } = $props();
 
   const browsers = [
     { label: 'None', value: '' },
@@ -16,7 +12,7 @@
   ];
 
   function handleChange() {
-    dispatch('change', { cookiesPath, cookiesBrowser });
+    onchange?.({ detail: { cookiesPath, cookiesBrowser } });
   }
 </script>
 
@@ -28,17 +24,17 @@
         id="cookies-path"
         type="text"
         bind:value={cookiesPath}
-        on:change={handleChange}
+        onchange={handleChange}
         placeholder="Paste cookies file path or browse..."
       />
-      <button class="secondary" type="button" on:click={() => dispatch('browse')}>
+      <button class="secondary" type="button" onclick={() => onbrowse?.()}>
         Browse
       </button>
     </div>
   </div>
   <div class="field">
-    <label for="cookies-browser">Cookies from browser (optional)</label>
-    <select id="cookies-browser" bind:value={cookiesBrowser} on:change={handleChange}>
+    <label for="cookies-browser">Or import cookies from browser</label>
+    <select id="cookies-browser" bind:value={cookiesBrowser} onchange={handleChange}>
       {#each browsers as browser}
         <option value={browser.value}>{browser.label}</option>
       {/each}
@@ -48,16 +44,16 @@
 
 <style>
   .cookies {
-    display: grid;
-    grid-template-columns: 1fr 220px;
-    gap: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
   }
 
   .field label {
     display: block;
     font-size: 12px;
-    color: #b5b9c5;
-    margin-bottom: 6px;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
   }
 
   .field input,
@@ -65,36 +61,27 @@
     width: 100%;
     padding: 8px 12px;
     border-radius: 8px;
-    border: 1px solid #2a2f3a;
-    background: #0f1115;
-    color: #f2f2f2;
+    border: 1px solid var(--border-input);
+    background: var(--bg-input);
+    color: var(--text);
   }
 
   .input-group {
     display: flex;
-    gap: 8px;
-  }
-
-  .input-group input {
-    flex: 1;
+    flex-direction: column;
+    gap: 6px;
   }
 
   .secondary {
-    background: #2a2f3a;
+    background: var(--border-input);
     border: none;
-    color: #f2f2f2;
+    color: var(--text);
     padding: 8px 12px;
     border-radius: 8px;
     cursor: pointer;
   }
 
   .secondary:hover {
-    background: #3a4050;
-  }
-
-  @media (max-width: 960px) {
-    .cookies {
-      grid-template-columns: 1fr;
-    }
+    background: var(--border);
   }
 </style>

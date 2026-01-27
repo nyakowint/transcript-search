@@ -38,26 +38,23 @@
   }
 </script>
 
-<div class="panel">
-  <div class="panel-header">
-    <h2>Transcript</h2>
-    <span>{transcript.length} lines</span>
-  </div>
-  <div class="transcript">
+<div class="transcript-panel">
+  {#if transcript.length > 0}
+    <div class="panel-header">
+      <span class="count">{transcript.length} lines</span>
+    </div>
+  {/if}
+  <div class="transcript-list">
     {#if transcript.length === 0}
-      <p class="empty">Select a video to see its transcript.</p>
+      <p class="empty">Select a video to view its transcript.</p>
     {:else}
       {#each transcript as segment}
         <div class="segment">
           <span class="time">{formatTime(segment.start_ms)}</span>
           <span class="text">{segment.text}</span>
           <div class="actions">
-            <button type="button" title="Open in browser" on:click={() => openInBrowser(segment.start_ms)}>
-              ↗
-            </button>
-            <button type="button" title="Copy link" on:click={() => copyLink(segment.start_ms)}>
-              📋
-            </button>
+            <button type="button" title="Open" onclick={() => openInBrowser(segment.start_ms)}>↗</button>
+            <button type="button" title="Copy" onclick={() => copyLink(segment.start_ms)}>📋</button>
           </div>
         </div>
       {/each}
@@ -66,49 +63,54 @@
 </div>
 
 <style>
-  .panel {
-    background: #171a21;
-    border-radius: 12px;
-    padding: 16px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  .transcript-panel {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
   }
 
   .panel-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    margin-bottom: 12px;
+    justify-content: flex-end;
+    padding-bottom: 8px;
+    flex-shrink: 0;
   }
 
-  .panel-header span {
-    color: #b5b9c5;
-    font-size: 12px;
+  .count {
+    font-size: 11px;
+    color: var(--text-muted);
   }
 
-  .transcript {
-    max-height: 320px;
-    overflow: auto;
-    border: 1px solid #2a2f3a;
-    border-radius: 8px;
-    padding: 8px;
-    background: #0f1115;
+  .transcript-list {
+    flex: 1;
+    overflow-y: auto;
   }
 
   .segment {
     display: grid;
-    grid-template-columns: 60px 1fr auto;
-    gap: 12px;
-    padding: 6px 0;
-    border-bottom: 1px solid #1f232b;
+    grid-template-columns: 50px 1fr auto;
+    gap: 10px;
+    padding: 8px 4px;
+    border-radius: 6px;
     align-items: start;
   }
 
+  .segment:hover {
+    background: var(--border);
+  }
+
   .time {
-    color: #7aa2ff;
+    color: var(--accent);
+    font-size: 11px;
+    font-family: "SF Mono", "Consolas", monospace;
   }
 
   .text {
-    color: #f2f2f2;
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.4;
   }
 
   .actions {
@@ -123,21 +125,23 @@
   }
 
   .actions button {
-    background: #2a2f3a;
+    background: var(--border-input);
     border: none;
-    color: #b5b9c5;
-    font-size: 12px;
-    padding: 4px 6px;
+    color: var(--text-muted);
+    font-size: 11px;
+    padding: 3px 5px;
     border-radius: 4px;
     cursor: pointer;
   }
 
   .actions button:hover {
-    background: #3a4050;
-    color: #f2f2f2;
+    background: var(--border);
+    color: var(--text);
   }
 
   .empty {
-    color: #8c92a2;
+    color: var(--text-muted);
+    font-size: 13px;
+    margin: 0;
   }
 </style>

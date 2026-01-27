@@ -1,180 +1,198 @@
 <script>
-  import { createEventDispatcher } from 'svelte';
-
-  let { videos = [], missing = [] } = $props();
-
-  const dispatch = createEventDispatcher();
+  let { videos = [], missing = [], onselect, ondelete, ondeleteAll } = $props();
 
   function handleSelect(videoId) {
-    dispatch('select', videoId);
+    onselect?.({ detail: videoId });
   }
 
   function handleDelete(event, videoId) {
     event.stopPropagation();
-    dispatch('delete', videoId);
+    ondelete?.({ detail: videoId });
   }
 
   function handleDeleteAll() {
-    dispatch('deleteAll');
+    ondeleteAll?.();
   }
 </script>
 
-<div class="panel">
-  <div class="panel-header">
-    <h2>Videos</h2>
-    <div class="header-actions">
-      <span>{videos.length} loaded</span>
-      {#if videos.length > 0}
-        <button class="btn-danger-sm" type="button" on:click={handleDeleteAll} title="Remove all videos">
-          Clear all
-        </button>
-      {/if}
-    </div>
+<div class="video-list">
+  <div class="list-header">
+    <span class="label">Videos ({videos.length})</span>
+    {#if videos.length > 0}
+      <button class="btn-clear" type="button" onclick={handleDeleteAll}>Clear all</button>
+    {/if}
   </div>
-  <ul>
+  <ul class="video-items">
     {#if videos.length === 0}
-      <li class="empty">No videos loaded yet.</li>
+      <li class="empty">No videos loaded.</li>
     {:else}
       {#each videos as video}
         <li>
-          <button type="button" class="video-btn" on:click={() => handleSelect(video.id)}>
-            <strong>{video.title || video.id}</strong>
-            <span>{video.channel || 'Unknown'}</span>
-            <span class="pill">{video.subtitle_type}</span>
+          <button type="button" class="video-btn" onclick={() => handleSelect(video.id)}>
+            <span class="video-title">{video.title || video.id}</span>
+            <span class="video-meta">
+              {video.channel || ''}
+              <span class="pill">{video.subtitle_type}</span>
+            </span>
           </button>
           <button
             type="button"
             class="btn-delete"
-            on:click={(e) => handleDelete(e, video.id)}
-            title="Remove video"
-          >
-            ✕
-          </button>
+            onclick={(e) => handleDelete(e, video.id)}
+          >✕</button>
         </li>
       {/each}
     {/if}
   </ul>
-  <h3>Missing subtitles</h3>
-  <ul class="muted">
-    {#if missing.length === 0}
-      <li class="empty">All videos have subtitles.</li>
-    {:else}
-      {#each missing as video}
-        <li>
-          <span>{video.title || video.id}</span>
-          <span>{video.channel || 'Unknown'}</span>
-        </li>
-      {/each}
-    {/if}
-  </ul>
+
+  {#if missing.length > 0}
+    <div class="missing-section">
+      <span class="label">Missing subtitles ({missing.length})</span>
+      <ul class="missing-items">
+        {#each missing as video}
+          <li>{video.title || video.id}</li>
+        {/each}
+      </ul>
+    </div>
+  {/if}
 </div>
 
 <style>
-  .panel {
-    background: #171a21;
-    border-radius: 12px;
-    padding: 16px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  .video-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+    min-height: 0;
   }
 
-  .panel-header {
+  .list-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 12px;
+    flex-shrink: 0;
   }
 
-  .header-actions {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .header-actions span {
-    color: #b5b9c5;
-    font-size: 12px;
-  }
-
-  .btn-danger-sm {
-    background: #3a2a2a;
-    border: 1px solid #5a3a3a;
-    color: #ff8a8a;
+  .label {
     font-size: 11px;
-    padding: 4px 8px;
-    border-radius: 6px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+  }
+
+  .btn-clear {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 11px;
     cursor: pointer;
+    padding: 2px 6px;
   }
 
-  .btn-danger-sm:hover {
-    background: #4a3030;
+  .btn-clear:hover {
+    color: var(--error);
   }
 
-  span {
-    color: #b5b9c5;
-    font-size: 12px;
-  }
-
-  ul {
+  .video-items {
     list-style: none;
     padding: 0;
-    margin: 0 0 16px;
+    margin: 0;
+    overflow-y: auto;
+    flex: 1;
   }
 
-  li {
-    padding: 6px 0;
-    border-bottom: 1px solid #252a33;
+  .video-items li {
     display: flex;
-    align-items: flex-start;
-    gap: 8px;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 6px;
+    border-radius: 6px;
   }
 
-  li .video-btn {
+  .video-items li:hover {
+    background: var(--border);
+  }
+
+  .video-btn {
     flex: 1;
     background: transparent;
     border: none;
-    color: #f2f2f2;
+    color: var(--text);
     text-align: left;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 2px;
     cursor: pointer;
     padding: 0;
+    min-width: 0;
   }
 
-  li .video-btn:hover strong {
-    color: #7aa2ff;
+  .video-title {
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .video-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .pill {
+    background: var(--border-input);
+    color: var(--text-secondary);
+    font-size: 10px;
+    padding: 1px 5px;
+    border-radius: 4px;
   }
 
   .btn-delete {
     background: transparent;
     border: none;
-    color: #6a6e7a;
-    font-size: 14px;
+    color: var(--text-muted);
+    font-size: 12px;
     cursor: pointer;
-    padding: 2px 6px;
-    border-radius: 4px;
+    padding: 2px 4px;
+    opacity: 0;
+  }
+
+  li:hover .btn-delete {
+    opacity: 1;
   }
 
   .btn-delete:hover {
-    background: #3a2a2a;
-    color: #ff8a8a;
-  }
-
-  .pill {
-    background: #2a2f3a;
-    color: #cfd4e6;
-    font-size: 11px;
-    padding: 2px 6px;
-    border-radius: 999px;
-    display: inline-block;
-    width: fit-content;
+    color: var(--error);
   }
 
   .empty {
-    color: #8c92a2;
+    color: var(--text-muted);
+    font-size: 12px;
+    padding: 8px 4px;
   }
 
-  .muted span {
-    color: #c8cddc;
+  .missing-section {
+    border-top: 1px solid var(--border);
+    padding-top: 12px;
+    margin-top: 8px;
+    flex-shrink: 0;
+  }
+
+  .missing-items {
+    list-style: none;
+    padding: 0;
+    margin: 6px 0 0;
+    max-height: 120px;
+    overflow-y: auto;
+  }
+
+  .missing-items li {
+    font-size: 12px;
+    color: var(--text-muted);
+    padding: 3px 4px;
   }
 </style>
