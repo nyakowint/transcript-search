@@ -11,7 +11,7 @@ def main() -> None:
     # Ensure yt-dlp is available before starting
     ensure_ytdlp()
     
-    ui_path = "build/index.html"
+    ui_path = "build/ui/index.html"
     api = Api()
     window = webview.create_window(
         "Caption Search",
@@ -23,7 +23,7 @@ def main() -> None:
     api.set_window(window)
     debug = "--debug" in sys.argv
     webview.settings["SHOW_DEFAULT_MENUS"] = debug
-    webview.start(debug=debug, http_server=True)
+    webview.start(debug=debug, http_server=True, icon="src/public/favicon.ico")
 
 
 if __name__ == "__main__":

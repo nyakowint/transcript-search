@@ -12,7 +12,7 @@ export default defineConfig({
   base: './',
   plugins: [svelte()],
   build: {
-    outDir: '../build',
+    outDir: '../build/ui',
     emptyOutDir: true,
     assetsDir: '.',
     cssCodeSplit: false,
