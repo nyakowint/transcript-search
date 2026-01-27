@@ -1,9 +1,8 @@
 {
   "tasks": {
-    "app": "deno task build && python app.py",
-    "dev": "deno run -A npm:vite dev --port ",
+    "dev": "deno task build && python app.py",
     "build": "deno run -A npm:vite build",
-    "build:exe": "deno task build && pyinstaller caption-search.spec --distpath build/app --workpath build/pyinstaller",
+    "build:exe": "deno task build && pyinstaller caption-search.spec --distpath build/app --workpath build/pyinstaller --noconfirm",
     "preview": "deno run -A npm:vite preview"
   },
   "imports": {

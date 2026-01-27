@@ -19,7 +19,6 @@ For macos/linux you should build it yourself lol its simple
 
 - **Python 3.10+**
 - **Deno 2.0+**
-- **FFmpeg** in PATH
 
 1. Install Python dependencies:
    ```
