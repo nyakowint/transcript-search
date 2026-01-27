@@ -1,15 +1,22 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+distpath = 'build/app'
+workpath = 'build/pyinstaller'
+
 a = Analysis(
     ['app.py'],
     pathex=[],
     binaries=[],
-    datas=[('build', 'build')],
+    datas=[('build/ui', 'build/ui')],
     hiddenimports=['clr_loader', 'pythonnet'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=[
+        'PyQt5', 'PyQt6', 'PySide2', 'PySide6',
+        'tkinter', 'matplotlib', 'numpy', 'pandas',
+        'scipy', 'PIL', 'cv2', 'torch', 'tensorflow',
+    ],
     noarchive=False,
 )
 
@@ -31,6 +38,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='src/public/favicon.ico',
 )
 
 coll = COLLECT(
