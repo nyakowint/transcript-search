@@ -5,15 +5,15 @@
   import VideoListPanel from './components/VideoListPanel.svelte';
   import { apiClient } from './services/api.js';
 
-  let status = '';
-  let statusError = false;
-  let urlsInput = '';
-  let cookiesPath = '';
-  let cookiesBrowser = '';
-  let videos = [];
-  let missing = [];
-  let transcript = [];
-  let searchResults = [];
+  let status = $state('');
+  let statusError = $state(false);
+  let urlsInput = $state('');
+  let cookiesPath = $state('');
+  let cookiesBrowser = $state('');
+  let videos = $state([]);
+  let missing = $state([]);
+  let transcript = $state([]);
+  let searchResults = $state([]);
 
   function setStatus(message, isError = false) {
     status = message;

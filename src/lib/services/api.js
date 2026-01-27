@@ -15,11 +15,15 @@ async function waitForApi(timeoutMs = 10000) {
 
 export const apiClient = {
   onReady(callback) {
-    if (window.pywebview) {
+    if (window.pywebview && window.pywebview.api) {
       callback();
       return;
     }
-    window.addEventListener('pywebviewready', callback, { once: true });
+    window.addEventListener('pywebviewready', () => {
+      if (window.pywebview?.api) {
+        callback();
+      }
+    });
   },
   async safe(fn) {
     const api = await waitForApi();

@@ -1,10 +1,10 @@
 <script>
   import { createEventDispatcher } from 'svelte';
 
-  export let searchResults = [];
+  let { searchResults = [] } = $props();
 
   const dispatch = createEventDispatcher();
-  let query = '';
+  let query = $state('');
 
   function submit() {
     dispatch('search', query);

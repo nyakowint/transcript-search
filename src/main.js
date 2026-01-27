@@ -1,7 +1,16 @@
+import { mount } from 'svelte';
 import App from './lib/App.svelte';
 
-const app = new App({
-  target: document.getElementById('app'),
-});
+function start() {
+  const target = document.getElementById('app');
+  if (!target) {
+    throw new Error('App mount point not found.');
+  }
+  mount(App, { target });
+}
 
-export default app;
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', start);
+} else {
+  start();
+}

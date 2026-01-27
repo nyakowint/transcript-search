@@ -1,8 +1,7 @@
 <script>
   import { createEventDispatcher } from 'svelte';
 
-  export let cookiesPath = '';
-  export let cookiesBrowser = '';
+  let { cookiesPath = '', cookiesBrowser = '' } = $props();
 
   const dispatch = createEventDispatcher();
 

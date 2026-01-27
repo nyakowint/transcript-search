@@ -1,5 +1,5 @@
 <script>
-  export let transcript = [];
+  let { transcript = [] } = $props();
 
   function formatTime(ms) {
     const totalSeconds = Math.floor(ms / 1000);

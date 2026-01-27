@@ -19,7 +19,7 @@ def main() -> None:
     api.set_window(window)
     debug = "--debug" in sys.argv
     webview.settings["SHOW_DEFAULT_MENUS"] = debug
-    webview.start(debug=debug, http_server=True)
+    webview.start(debug=debug, http_server=True, private_mode=not debug)
 
 
 if __name__ == "__main__":

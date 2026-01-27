@@ -1,8 +1,7 @@
 <script>
   import { createEventDispatcher } from 'svelte';
 
-  export let videos = [];
-  export let missing = [];
+  let { videos = [], missing = [] } = $props();
 
   const dispatch = createEventDispatcher();
 
