@@ -1,401 +1,126 @@
+"""pywebview JS bridge.
+
+Every method here is callable from the UI. Ingest work is deliberately *not*
+done inline: a channel takes tens of seconds, and the pywebview bridge is
+synchronous, so running it on the calling thread would freeze the window. Jobs
+run on a worker thread and report progress by pushing events into the page.
+"""
+
 from __future__ import annotations
 
-import glob
-import html
 import json
 import os
 import re
-import sqlite3
-import subprocess
-import sys
-import tempfile
-from datetime import datetime, timezone
+import threading
+import traceback
+import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Callable, Optional
 
-# Hide console windows on Windows when running subprocess
-_SUBPROCESS_FLAGS = (
-    getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+from ingest import Ingestor, IngestOptions, build_targets
+from store import CaptionStore, SearchSyntaxError
+from ytdlp_manager import ensure_ytdlp, get_local_version, resolve_ytdlp
+from ytdlp_url import CHANNEL_TABS, Target
+
+SETTING_KEYS = (
+    "cookies_path",
+    "cookies_browser",
+    "preferred_languages",
+    "allow_auto",
+    "allow_other_languages",
+    "channel_tabs",
+    "concurrency",
+    "skip_existing",
+    "max_videos",
 )
 
-from ytdlp_manager import get_ytdlp_path
-
-TIME_RANGE_RE = re.compile(
-    r"(?P<start>\d{1,2}:\d{2}:\d{2}\.\d{3}|\d{1,2}:\d{2}\.\d{3})\s*-->\s*"
-    r"(?P<end>\d{1,2}:\d{2}:\d{2}\.\d{3}|\d{1,2}:\d{2}\.\d{3})"
-)
-TAG_RE = re.compile(r"<[^>]+>")
-
-
-def parse_input_urls(input_text: str) -> list[str]:
-    tokens = re.split(r"[\s,]+", input_text.strip())
-    return [token for token in tokens if token]
-
-
-def select_caption_language(captions: dict) -> Optional[str]:
-    if not captions:
-        return None
-    if "en" in captions:
-        return "en"
-    for key in captions:
-        if key.startswith("en"):
-            return key
-    return next(iter(captions))
+DEFAULT_SETTINGS = {
+    "cookies_path": "",
+    "cookies_browser": "",
+    "preferred_languages": "en",
+    "allow_auto": "1",
+    "allow_other_languages": "1",
+    "channel_tabs": "videos",
+    "concurrency": "6",
+    "skip_existing": "1",
+    "max_videos": "0",
+}
 
 
-def _parse_timestamp(value: str) -> int:
-    parts = value.replace(",", ".").split(":")
-    if len(parts) == 2:
-        hours = 0
-        minutes, seconds = parts
-    else:
-        hours, minutes, seconds = parts
-    total_seconds = int(hours) * 3600 + int(minutes) * 60 + float(seconds)
-    return int(total_seconds * 1000)
+class Job:
+    """State of one ingest run, shared between the worker and the UI."""
+
+    def __init__(self, job_id: str, kind: str, label: str) -> None:
+        self.id = job_id
+        self.kind = kind
+        self.label = label
+        self.status = "running"
+        self.phase = "starting"
+        self.message = ""
+        self.current = ""
+        self.found = 0
+        self.total = 0
+        self.completed = 0
+        self.ok = 0
+        self.missing = 0
+        self.failed = 0
+        self.added = 0
+        self.skipped = 0
+        self.errors: list[dict] = []
+        self.started_at = datetime.now(timezone.utc).isoformat()
+        self.finished_at = ""
+        self.cancel_event = threading.Event()
+        self.ingestor: Optional[Ingestor] = None
+
+    def snapshot(self) -> dict:
+        return {
+            "id": self.id,
+            "kind": self.kind,
+            "label": self.label,
+            "status": self.status,
+            "phase": self.phase,
+            "message": self.message,
+            "current": self.current,
+            "found": self.found,
+            "total": self.total,
+            "completed": self.completed,
+            "ok": self.ok,
+            "missing": self.missing,
+            "failed": self.failed,
+            "added": self.added,
+            "skipped": self.skipped,
+            # The full list can run to thousands on a bad night; the UI only
+            # ever shows a handful, so cap what crosses the bridge.
+            "errors": self.errors[:50],
+            "error_count": len(self.errors),
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+        }
 
 
-def _clean_caption_text(text: str) -> str:
-    cleaned = TAG_RE.sub("", html.unescape(text))
-    return " ".join(cleaned.split())
+_EXTRACTOR_TAG_RE = re.compile(r"^\[[^\]]+\]\s*")
 
 
-def parse_vtt(content: str) -> list[dict]:
-    segments: list[dict] = []
-    lines = content.splitlines()
-    index = 0
-    while index < len(lines):
-        line = lines[index].strip()
-        if not line or line.startswith("WEBVTT"):
-            index += 1
-            continue
-        if line.startswith("NOTE") or line.startswith("STYLE"):
-            index += 1
-            continue
-        match = TIME_RANGE_RE.match(line)
-        if not match and index + 1 < len(lines):
-            next_line = lines[index + 1].strip()
-            match = TIME_RANGE_RE.match(next_line)
-            if match:
-                index += 1
-        if not match:
-            index += 1
-            continue
-        start_ms = _parse_timestamp(match.group("start"))
-        end_ms = _parse_timestamp(match.group("end"))
-        index += 1
-        text_lines: list[str] = []
-        while index < len(lines) and lines[index].strip():
-            text_lines.append(lines[index].strip())
-            index += 1
-        caption_text = _clean_caption_text(" ".join(text_lines))
-        if caption_text:
-            segments.append(
-                {"start_ms": start_ms, "end_ms": end_ms, "text": caption_text}
-            )
-    return _dedupe_segments(segments)
+def _summarize_error(message: str) -> str:
+    """Turn a raw yt-dlp stderr line into something worth showing a user."""
+    text = (message or "").strip()
+    text = text.removeprefix("ERROR:").strip()
+    text = _EXTRACTOR_TAG_RE.sub("", text)
+    if "404" in text or "not found" in text.lower():
+        text += (
+            " - that URL does not resolve. YouTube retired many /c/ and /user/"
+            " links; try the channel's @handle URL instead."
+        )
+    return text
 
 
-def _dedupe_segments(segments: list[dict]) -> list[dict]:
-    """Deduplicate VTT segments to match YouTube's transcript display.
-
-    YouTube auto-generated captions have a rolling pattern:
-    - Short (10ms) segments with just new words
-    - Longer segments with accumulated text that overlap subsequent short ones
-
-    We keep only the "accumulated" segments (longer duration, more text) and
-    skip the short snippet segments whose text is contained in a nearby segment.
-    Then we trim/merge overlapping segments to remove rolling duplicates.
-    """
-    if not segments:
-        return []
-
-    sorted_segments = sorted(segments, key=lambda s: (s["start_ms"], s["end_ms"]))
-
-    # First pass: for segments with same start_ms, keep only the longest text
-    by_start: dict[int, dict] = {}
-    for seg in sorted_segments:
-        start = seg["start_ms"]
-        if start not in by_start or len(seg["text"]) > len(by_start[start]["text"]):
-            by_start[start] = seg
-
-    candidates = sorted(by_start.values(), key=lambda s: s["start_ms"])
-
-    # Second pass: remove short "snippet" segments whose text is a prefix of
-    # the next segment's text (the rolling caption pattern)
-    filtered: list[dict] = []
-    i = 0
-    while i < len(candidates):
-        current = candidates[i]
-        duration = current["end_ms"] - current["start_ms"]
-
-        # Check if this is a short snippet that should be skipped
-        if duration <= 50 and i + 1 < len(candidates):
-            next_seg = candidates[i + 1]
-            # Skip if next segment starts soon and contains our text
-            if (
-                next_seg["start_ms"] - current["end_ms"] <= 100
-                and current["text"] in next_seg["text"]
-            ):
-                i += 1
-                continue
-
-        filtered.append(current)
-        i += 1
-
-    # Third pass: trim overlapping prefixes and merge short continuations
-    def _tokenize(text: str) -> list[str]:
-        return text.split()
-
-    def _overlap(prev_text: str, curr_text: str) -> int:
-        prev_words = _tokenize(prev_text)
-        curr_words = _tokenize(curr_text)
-        max_len = min(len(prev_words), len(curr_words))
-        for size in range(max_len, 0, -1):
-            if prev_words[-size:] == curr_words[:size]:
-                return size
-        return 0
-
-    deduped: list[dict] = []
-    for seg in filtered:
-        if not deduped:
-            deduped.append(seg)
-            continue
-
-        prev = deduped[-1]
-        if seg["start_ms"] - prev["end_ms"] > 1000:
-            deduped.append(seg)
-            continue
-
-        if seg["text"] in prev["text"]:
-            continue
-
-        overlap_words = _overlap(prev["text"], seg["text"])
-        if overlap_words:
-            curr_words = _tokenize(seg["text"])
-            trimmed_words = curr_words[overlap_words:]
-            if not trimmed_words:
-                continue
-            trimmed_text = " ".join(trimmed_words)
-            overlap_ratio = overlap_words / max(1, len(curr_words))
-            if len(trimmed_words) <= 3 or overlap_ratio >= 0.6:
-                prev["text"] = f"{prev['text']} {trimmed_text}".strip()
-                prev["end_ms"] = max(prev["end_ms"], seg["end_ms"])
-            else:
-                deduped.append(
-                    {
-                        "start_ms": seg["start_ms"],
-                        "end_ms": seg["end_ms"],
-                        "text": trimmed_text,
-                    }
-                )
-            continue
-
-        deduped.append(seg)
-
-    return deduped
+def _ok(**payload) -> dict:
+    return {"ok": True, **payload}
 
 
-class CaptionStore:
-    def __init__(self, db_path: Path | str) -> None:
-        self.db_path = str(db_path)
-        if self.db_path != ":memory:":
-            Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._ensure_db()
-
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
-
-    def _ensure_db(self) -> None:
-        conn = self._connect()
-        with conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS videos (
-                    id TEXT PRIMARY KEY,
-                    title TEXT,
-                    channel TEXT,
-                    channel_id TEXT,
-                    upload_date TEXT,
-                    subtitle_type TEXT,
-                    subtitle_language TEXT,
-                    source_url TEXT,
-                    fetched_at TEXT
-                )
-                """
-            )
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS transcript_segments (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    video_id TEXT,
-                    start_ms INTEGER,
-                    end_ms INTEGER,
-                    text TEXT,
-                    FOREIGN KEY(video_id) REFERENCES videos(id)
-                )
-                """
-            )
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS settings (
-                    key TEXT PRIMARY KEY,
-                    value TEXT
-                )
-                """
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_segments_video ON transcript_segments(video_id)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_segments_text ON transcript_segments(text)"
-            )
-        conn.close()
-
-    def upsert_video(self, video: dict, segments: Iterable[dict]) -> None:
-        conn = self._connect()
-        with conn:
-            conn.execute(
-                """
-                INSERT INTO videos (
-                    id, title, channel, channel_id, upload_date,
-                    subtitle_type, subtitle_language, source_url, fetched_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    title=excluded.title,
-                    channel=excluded.channel,
-                    channel_id=excluded.channel_id,
-                    upload_date=excluded.upload_date,
-                    subtitle_type=excluded.subtitle_type,
-                    subtitle_language=excluded.subtitle_language,
-                    source_url=excluded.source_url,
-                    fetched_at=excluded.fetched_at
-                """,
-                (
-                    video["id"],
-                    video["title"],
-                    video["channel"],
-                    video["channel_id"],
-                    video["upload_date"],
-                    video["subtitle_type"],
-                    video["subtitle_language"],
-                    video["source_url"],
-                    video["fetched_at"],
-                ),
-            )
-            conn.execute(
-                "DELETE FROM transcript_segments WHERE video_id = ?", (video["id"],)
-            )
-            conn.executemany(
-                """
-                INSERT INTO transcript_segments (video_id, start_ms, end_ms, text)
-                VALUES (?, ?, ?, ?)
-                """,
-                (
-                    (
-                        video["id"],
-                        segment["start_ms"],
-                        segment["end_ms"],
-                        segment["text"],
-                    )
-                    for segment in segments
-                ),
-            )
-        conn.close()
-
-    def get_videos(self) -> list[dict]:
-        conn = self._connect()
-        rows = conn.execute(
-            """
-            SELECT id, title, channel, channel_id, upload_date,
-                   subtitle_type, subtitle_language, source_url, fetched_at
-            FROM videos
-            ORDER BY title
-            """
-        ).fetchall()
-        conn.close()
-        return [dict(row) for row in rows]
-
-    def get_transcript(self, video_id: str) -> list[dict]:
-        conn = self._connect()
-        rows = conn.execute(
-            """
-            SELECT start_ms, end_ms, text
-            FROM transcript_segments
-            WHERE video_id = ?
-            ORDER BY start_ms
-            """,
-            (video_id,),
-        ).fetchall()
-        conn.close()
-        return [dict(row) for row in rows]
-
-    def search_segments(self, query: str) -> list[dict]:
-        if not query.strip():
-            return []
-        conn = self._connect()
-        rows = conn.execute(
-            """
-            SELECT s.video_id, s.start_ms, s.end_ms, s.text,
-                   v.title, v.channel, v.source_url
-            FROM transcript_segments s
-            JOIN videos v ON v.id = s.video_id
-            WHERE lower(s.text) LIKE ?
-            ORDER BY v.title, s.start_ms
-            """,
-            (f"%{query.lower()}%",),
-        ).fetchall()
-        conn.close()
-        return [dict(row) for row in rows]
-
-    def get_missing_subtitles(self) -> list[dict]:
-        conn = self._connect()
-        rows = conn.execute(
-            """
-            SELECT id, title, channel, channel_id, source_url
-            FROM videos
-            WHERE subtitle_type = 'none'
-            ORDER BY title
-            """
-        ).fetchall()
-        conn.close()
-        return [dict(row) for row in rows]
-
-    def delete_video(self, video_id: str) -> None:
-        conn = self._connect()
-        with conn:
-            conn.execute("DELETE FROM transcript_segments WHERE video_id = ?", (video_id,))
-            conn.execute("DELETE FROM videos WHERE id = ?", (video_id,))
-        conn.close()
-
-    def delete_all_videos(self) -> None:
-        conn = self._connect()
-        with conn:
-            conn.execute("DELETE FROM transcript_segments")
-            conn.execute("DELETE FROM videos")
-        conn.close()
-
-    def get_setting(self, key: str) -> str:
-        conn = self._connect()
-        row = conn.execute(
-            "SELECT value FROM settings WHERE key = ?", (key,)
-        ).fetchone()
-        conn.close()
-        return row["value"] if row else ""
-
-    def set_setting(self, key: str, value: str) -> None:
-        conn = self._connect()
-        with conn:
-            conn.execute(
-                """
-                INSERT INTO settings (key, value)
-                VALUES (?, ?)
-                ON CONFLICT(key) DO UPDATE SET value=excluded.value
-                """,
-                (key, value),
-            )
-        conn.close()
+def _err(message: str) -> dict:
+    return {"ok": False, "error": message}
 
 
 class Api:
@@ -404,103 +129,31 @@ class Api:
         self._data_dir.mkdir(parents=True, exist_ok=True)
         self._store = CaptionStore(self._data_dir / "captions.db")
         self._window = None
-        self._serializable = False
-        self._ytdlp = str(get_ytdlp_path())
+        self._jobs: dict[str, Job] = {}
+        self._jobs_lock = threading.Lock()
+        self._active_job_id = ""
 
     def set_window(self, window) -> None:
         self._window = window
 
-    def select_cookies_file(self) -> dict:
+    # ------------------------------------------------------------ UI plumbing
+
+    def _push(self, event: dict) -> None:
+        """Send an event to the page.
+
+        pywebview has no server push, so this evaluates a call to a hook the
+        frontend installs. Failures are swallowed: the window may be closing,
+        and a dropped progress tick must never break an ingest.
+        """
         if not self._window:
-            return {"ok": False, "error": "Window is not ready."}
-        files = self._window.create_file_dialog(
-            file_types=("Cookies (*.txt;*.cookies;*.json)", "All files (*.*)")
-        )
-        if not files:
-            return {"ok": True, "path": ""}
-        return {"ok": True, "path": self._normalize_path(files[0])}
-
-    def get_settings(self) -> dict:
-        return {
-            "ok": True,
-            "settings": {
-                "cookies_path": self._store.get_setting("cookies_path"),
-                "cookies_browser": self._store.get_setting("cookies_browser"),
-            },
-        }
-
-    def save_settings(self, cookies_path: str, cookies_browser: str) -> dict:
-        normalized_path = self._normalize_path(cookies_path)
-        self._store.set_setting("cookies_path", normalized_path)
-        self._store.set_setting("cookies_browser", (cookies_browser or "").strip())
-        return {"ok": True}
-
-    def ingest_urls(
-        self,
-        input_text: str,
-        cookies_path: str | None = None,
-        cookies_browser: str | None = None,
-    ) -> dict:
-        urls = parse_input_urls(input_text)
-        if not urls:
-            return {"ok": False, "error": "Provide at least one URL."}
-        cookies_path = self._normalize_path(cookies_path or "")
-        cookies_browser = (cookies_browser or "").strip() or None
-        self._store.set_setting("cookies_path", cookies_path or "")
-        self._store.set_setting("cookies_browser", cookies_browser or "")
-        if cookies_path and not Path(cookies_path).exists():
-            return {"ok": False, "error": f"Cookies file not found: {cookies_path}"}
+            return
         try:
-            expanded_urls = self._expand_urls(urls, cookies_path, cookies_browser)
-        except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
-            return {"ok": False, "error": str(exc)}
-        processed: list[dict] = []
-        missing: list[dict] = []
-        errors: list[dict] = []
-        seen: set[str] = set()
-        for url in expanded_urls:
-            if url in seen:
-                continue
-            seen.add(url)
-            try:
-                video = self._process_video(url, cookies_path, cookies_browser)
-            except (subprocess.CalledProcessError, json.JSONDecodeError, FileNotFoundError, ValueError) as exc:
-                errors.append({"url": url, "error": str(exc)})
-                continue
-            processed.append(video)
-            if video["subtitle_type"] == "none":
-                missing.append(video)
-        return {"ok": True, "processed": processed, "missing": missing, "errors": errors}
-
-    def get_videos(self) -> dict:
-        return {"ok": True, "videos": self._store.get_videos()}
-
-    def get_transcript(self, video_id: str) -> dict:
-        return {"ok": True, "segments": self._store.get_transcript(video_id)}
-
-    def search_transcripts(self, query: str) -> dict:
-        return {"ok": True, "results": self._store.search_segments(query)}
-
-    def get_missing_subtitles(self) -> dict:
-        return {"ok": True, "videos": self._store.get_missing_subtitles()}
-
-    def delete_video(self, video_id: str) -> dict:
-        self._store.delete_video(video_id)
-        return {"ok": True}
-
-    def delete_all_videos(self) -> dict:
-        self._store.delete_all_videos()
-        return {"ok": True}
-
-    def _base_ytdlp_args(
-        self, cookies_path: Optional[str], cookies_browser: Optional[str]
-    ) -> list[str]:
-        args = [self._ytdlp, "--no-warnings", "-q"]
-        if cookies_path:
-            args.extend(["--cookies", cookies_path])
-        if cookies_browser:
-            args.extend(["--cookies-from-browser", cookies_browser])
-        return args
+            payload = json.dumps(event)
+            self._window.evaluate_js(
+                f"window.__captionSearchEvent && window.__captionSearchEvent({payload})"
+            )
+        except Exception:
+            pass
 
     def _normalize_path(self, raw_path: str) -> str:
         if not raw_path:
@@ -517,129 +170,390 @@ class Api:
         path = os.path.expandvars(os.path.expanduser(path))
         return os.path.normpath(path)
 
-    def _expand_urls(
-        self,
-        urls: Iterable[str],
-        cookies_path: Optional[str],
-        cookies_browser: Optional[str],
-    ) -> list[str]:
-        expanded: list[str] = []
-        base_args = self._base_ytdlp_args(cookies_path, cookies_browser)
-        for url in urls:
-            args = base_args + ["--flat-playlist", "-J", url]
-            result = subprocess.run(
-                args, capture_output=True, text=True, timeout=120, creationflags=_SUBPROCESS_FLAGS
-            )
-            if result.returncode != 0:
-                raise RuntimeError(result.stderr or f"yt-dlp failed for {url}")
-            info = json.loads(result.stdout)
-            if info.get("_type") in {"playlist", "multi_video"}:
-                entries = info.get("entries") or []
-                for entry in entries:
-                    entry_url = self._entry_to_url(entry)
-                    if entry_url:
-                        expanded.append(entry_url)
-            else:
-                expanded.append(info.get("webpage_url") or url)
-        return expanded
-
-    def _entry_to_url(self, entry: dict) -> Optional[str]:
-        entry_url = entry.get("webpage_url") or entry.get("url")
-        if entry_url:
-            if entry_url.startswith("http"):
-                return entry_url
-            ie_key = (entry.get("ie_key") or entry.get("extractor_key") or "").lower()
-            if "youtube" in ie_key:
-                return f"https://www.youtube.com/watch?v={entry_url}"
-        entry_id = entry.get("id")
-        if entry_id:
-            return f"https://www.youtube.com/watch?v={entry_id}"
-        return None
-
-    def _process_video(
-        self, url: str, cookies_path: Optional[str], cookies_browser: Optional[str]
-    ) -> dict:
-        info = self._extract_video_info(url, cookies_path, cookies_browser)
-        video_id = info.get("id")
-        if not video_id:
-            raise ValueError("Missing video ID from yt-dlp info.")
-        subtitles = info.get("subtitles") or {}
-        automatic = info.get("automatic_captions") or {}
-        subtitle_type = "none"
-        language: Optional[str] = None
-        if subtitles:
-            subtitle_type = "manual"
-            language = select_caption_language(subtitles)
-        elif automatic:
-            subtitle_type = "auto"
-            language = select_caption_language(automatic)
-        if subtitle_type != "none" and not language:
-            subtitle_type = "none"
-        segments: list[dict] = []
-        if subtitle_type != "none" and language:
-            vtt_content = self._download_subtitles(
-                url, video_id, subtitle_type, language, cookies_path, cookies_browser
-            )
-            segments = parse_vtt(vtt_content)
-        video = {
-            "id": video_id,
-            "title": info.get("title") or "",
-            "channel": info.get("channel") or info.get("uploader") or "",
-            "channel_id": info.get("channel_id") or info.get("uploader_id") or "",
-            "upload_date": info.get("upload_date") or "",
-            "subtitle_type": subtitle_type,
-            "subtitle_language": language or "",
-            "source_url": info.get("webpage_url") or url,
-            "fetched_at": datetime.now(timezone.utc).isoformat(),
-        }
-        self._store.upsert_video(video, segments)
-        video["segment_count"] = len(segments)
-        return video
-
-    def _extract_video_info(
-        self, url: str, cookies_path: Optional[str], cookies_browser: Optional[str]
-    ) -> dict:
-        args = self._base_ytdlp_args(cookies_path, cookies_browser) + [
-            "--skip-download", "-J", url
-        ]
-        result = subprocess.run(
-            args, capture_output=True, text=True, timeout=120, creationflags=_SUBPROCESS_FLAGS
+    def select_cookies_file(self) -> dict:
+        if not self._window:
+            return _err("Window is not ready.")
+        files = self._window.create_file_dialog(
+            file_types=("Cookies (*.txt;*.cookies;*.json)", "All files (*.*)")
         )
-        if result.returncode != 0:
-            raise RuntimeError(result.stderr or f"yt-dlp failed for {url}")
-        return json.loads(result.stdout)
+        if not files:
+            return _ok(path="")
+        return _ok(path=self._normalize_path(files[0]))
 
-    def _download_subtitles(
-        self,
-        url: str,
-        video_id: str,
-        subtitle_type: str,
-        language: str,
-        cookies_path: Optional[str],
-        cookies_browser: Optional[str],
-    ) -> str:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            outtmpl = os.path.join(temp_dir, "%(id)s.%(ext)s")
-            args = self._base_ytdlp_args(cookies_path, cookies_browser) + [
-                "--skip-download",
-                "--sub-lang", language,
-                "--sub-format", "vtt",
-                "-o", outtmpl,
-            ]
-            if subtitle_type == "manual":
-                args.append("--write-sub")
+    # -------------------------------------------------------------- settings
+
+    def get_settings(self) -> dict:
+        settings = {
+            key: self._store.get_setting(key, DEFAULT_SETTINGS[key])
+            for key in SETTING_KEYS
+        }
+        return _ok(
+            settings=settings,
+            channel_tab_options=list(CHANNEL_TABS),
+            ytdlp_version=get_local_version() or "",
+        )
+
+    def save_settings(self, settings: dict) -> dict:
+        settings = settings or {}
+        for key in SETTING_KEYS:
+            if key not in settings:
+                continue
+            value = settings[key]
+            if isinstance(value, bool):
+                value = "1" if value else "0"
+            elif isinstance(value, (list, tuple)):
+                value = ",".join(str(item) for item in value)
             else:
-                args.append("--write-auto-sub")
-            args.append(url)
-            
-            result = subprocess.run(
-                args, capture_output=True, text=True, timeout=120, creationflags=_SUBPROCESS_FLAGS
+                value = str(value)
+            if key == "cookies_path":
+                value = self._normalize_path(value)
+            self._store.set_setting(key, value)
+        return self.get_settings()
+
+    def _options_from_settings(self, overrides: dict | None = None) -> IngestOptions:
+        raw = {
+            key: self._store.get_setting(key, DEFAULT_SETTINGS[key])
+            for key in SETTING_KEYS
+        }
+        raw.update(overrides or {})
+
+        def as_bool(value) -> bool:
+            if isinstance(value, bool):
+                return value
+            return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+        def as_list(value) -> list[str]:
+            if isinstance(value, (list, tuple)):
+                return [str(item).strip() for item in value if str(item).strip()]
+            return [part.strip() for part in str(value).split(",") if part.strip()]
+
+        def as_int(value, default: int) -> int:
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return default
+
+        return IngestOptions(
+            preferred_languages=as_list(raw["preferred_languages"]) or ["en"],
+            allow_auto=as_bool(raw["allow_auto"]),
+            allow_other_languages=as_bool(raw["allow_other_languages"]),
+            channel_tabs=as_list(raw["channel_tabs"]) or list(CHANNEL_TABS),
+            concurrency=as_int(raw["concurrency"], 6),
+            skip_existing=as_bool(raw["skip_existing"]),
+            max_videos=as_int(raw["max_videos"], 0),
+            cookies_path=self._normalize_path(str(raw["cookies_path"])),
+            cookies_browser=str(raw["cookies_browser"]).strip(),
+        )
+
+    # ------------------------------------------------------------------ jobs
+
+    def _start_job(
+        self,
+        kind: str,
+        label: str,
+        worker: Callable[[Job, Ingestor, IngestOptions], None],
+        options: IngestOptions,
+    ) -> dict:
+        with self._jobs_lock:
+            active = self._jobs.get(self._active_job_id)
+            if active and active.status == "running":
+                return _err("A fetch is already running. Cancel it first.")
+            job = Job(uuid.uuid4().hex[:12], kind, label)
+            self._jobs[job.id] = job
+            self._active_job_id = job.id
+
+        ytdlp = resolve_ytdlp()
+        if not Path(ytdlp).exists():
+            job.status = "error"
+            job.message = f"yt-dlp not found at {ytdlp}"
+            return _err(job.message)
+
+        def on_event(event: dict) -> None:
+            job.phase = event.get("phase", job.phase)
+            for key in ("message", "current", "found", "total", "completed", "ok", "missing", "failed"):
+                if key in event:
+                    setattr(job, key, event[key])
+            self._push({"type": "job", "job": job.snapshot()})
+
+        job.ingestor = Ingestor(ytdlp, options, job.cancel_event, on_event)
+
+        def run() -> None:
+            try:
+                worker(job, job.ingestor, options)
+                job.status = "cancelled" if job.cancel_event.is_set() else "done"
+                job.phase = job.status
+            except Exception as exc:  # noqa: BLE001 - surface any worker crash to the UI
+                job.status = "error"
+                job.phase = "error"
+                job.message = str(exc)
+                job.errors.append({"error": traceback.format_exc(limit=3)})
+            finally:
+                job.finished_at = datetime.now(timezone.utc).isoformat()
+                self._push({"type": "job", "job": job.snapshot()})
+
+        threading.Thread(target=run, daemon=True, name=f"ingest-{job.id}").start()
+        return _ok(job=job.snapshot())
+
+    def _run_targets(
+        self,
+        job: Job,
+        ingestor: Ingestor,
+        options: IngestOptions,
+        targets: list[Target],
+        force_ids: Optional[set[str]] = None,
+    ) -> None:
+        """Enumerate targets, drop what we already have, then fetch the rest."""
+        stubs, enumerate_errors = ingestor.enumerate_targets(targets)
+        job.errors.extend(enumerate_errors)
+        job.found = len(stubs)
+
+        # Listing nothing *and* failing is a failure, not an empty result.
+        # Reporting "nothing new to fetch" here would dress a dead URL up as
+        # an up-to-date library.
+        if not stubs and enumerate_errors:
+            raise RuntimeError(_summarize_error(enumerate_errors[0]["error"]))
+
+        now = datetime.now(timezone.utc).isoformat()
+        for target in targets:
+            if target.kind in {"channel", "playlist"} and target.key:
+                self._store.upsert_source(
+                    {
+                        "id": target.key,
+                        "kind": target.kind,
+                        "title": target.label,
+                        "url": target.url,
+                        "added_at": now,
+                        "last_synced_at": now,
+                    }
+                )
+
+        if options.skip_existing:
+            existing = self._store.get_existing_video_ids() - (force_ids or set())
+            kept = [stub for stub in stubs if stub["id"] not in existing]
+            job.skipped = len(stubs) - len(kept)
+            # A video already stored can still be new to *this* source, so
+            # record the link even when its captions are not refetched.
+            links: dict[str, list[str]] = {}
+            for stub in stubs:
+                if stub["id"] not in existing:
+                    continue
+                for source_id in stub.get("source_ids", []):
+                    links.setdefault(source_id, []).append(stub["id"])
+            for source_id, video_ids in links.items():
+                self._store.link_videos_to_source(video_ids, source_id)
+            stubs = kept
+
+        job.total = len(stubs)
+        job.added = len(stubs)
+        if not stubs:
+            job.phase = "done"
+            job.message = "Nothing new to fetch."
+            return
+
+        result = ingestor.fetch_videos(
+            stubs,
+            lambda video, segments, source_ids: self._store.upsert_video(
+                video, segments, source_ids
+            ),
+        )
+        job.errors.extend(result["errors"])
+        counters = result["counters"]
+        job.completed = counters["completed"]
+        job.ok = counters["ok"]
+        job.missing = counters["missing"]
+        job.failed = counters["failed"]
+
+    # ---------------------------------------------------------------- ingest
+
+    def start_ingest(self, input_text: str, overrides: dict | None = None) -> dict:
+        options = self._options_from_settings(overrides)
+        targets, target_errors = build_targets(input_text, options)
+        if not targets:
+            message = target_errors[0]["error"] if target_errors else "Provide at least one URL."
+            return _err(message)
+        if options.cookies_path and not Path(options.cookies_path).exists():
+            return _err(f"Cookies file not found: {options.cookies_path}")
+
+        label = ", ".join(t.title or t.source_id or t.url for t in targets)[:80]
+
+        def worker(job: Job, ingestor: Ingestor, opts: IngestOptions) -> None:
+            job.errors.extend(target_errors)
+            self._run_targets(job, ingestor, opts, targets)
+
+        return self._start_job("ingest", label, worker, options)
+
+    def refetch_videos(self, video_ids: list[str], overrides: dict | None = None) -> dict:
+        """Re-download captions for specific videos, ignoring skip-existing."""
+        video_ids = [vid for vid in (video_ids or []) if vid]
+        if not video_ids:
+            return _err("No videos selected.")
+        options = self._options_from_settings(overrides)
+        options.skip_existing = False
+
+        def worker(job: Job, ingestor: Ingestor, opts: IngestOptions) -> None:
+            stubs = []
+            for video_id in video_ids:
+                video = self._store.get_video(video_id)
+                stubs.append(
+                    {
+                        "id": video_id,
+                        "title": (video or {}).get("title", ""),
+                        "duration": (video or {}).get("duration", 0),
+                        "source_ids": [],
+                    }
+                )
+            job.found = job.total = len(stubs)
+            result = ingestor.fetch_videos(
+                stubs,
+                lambda video, segments, source_ids: self._store.upsert_video(
+                    video, segments, source_ids
+                ),
             )
-            if result.returncode != 0:
-                raise RuntimeError(result.stderr or f"yt-dlp subtitle download failed for {url}")
-            
-            candidates = glob.glob(os.path.join(temp_dir, f"{video_id}*.vtt"))
-            if not candidates:
-                raise FileNotFoundError(f"Subtitle file not found for {video_id}.")
-            with open(candidates[0], "r", encoding="utf-8") as handle:
-                return handle.read()
+            job.errors.extend(result["errors"])
+            counters = result["counters"]
+            job.completed, job.ok = counters["completed"], counters["ok"]
+            job.missing, job.failed = counters["missing"], counters["failed"]
+
+        label = video_ids[0] if len(video_ids) == 1 else f"{len(video_ids)} videos"
+        return self._start_job("refetch", label, worker, options)
+
+    def sync_source(self, source_id: str, force: bool = False) -> dict:
+        """Re-scan a channel or playlist: pull in new uploads, optionally redo the rest."""
+        source = self._store.get_source(source_id)
+        if not source:
+            return _err(f"Unknown source: {source_id}")
+        options = self._options_from_settings()
+        options.skip_existing = not force
+        target = Target(
+            kind=source["kind"],
+            url=source["url"],
+            source_id=source["id"],
+            title=source.get("title") or source["id"],
+            tabs=options.channel_tabs if source["kind"] == "channel" else (),
+        )
+
+        def worker(job: Job, ingestor: Ingestor, opts: IngestOptions) -> None:
+            self._run_targets(job, ingestor, opts, [target])
+
+        return self._start_job("sync", target.title, worker, options)
+
+    def refetch_all(self, scope: str = "all", older_than_days: int = 0) -> dict:
+        """Refetch stored videos.
+
+        ``scope`` is ``all``, ``missing`` (only videos that had no captions --
+        uploaders add them after the fact), or ``stale`` (fetched longer ago
+        than ``older_than_days``).
+        """
+        videos = self._store.get_videos()
+        if scope == "missing":
+            videos = [v for v in videos if v.get("subtitle_type") == "none"]
+        elif scope == "stale":
+            cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, older_than_days))
+            kept = []
+            for video in videos:
+                try:
+                    fetched = datetime.fromisoformat(video.get("fetched_at") or "")
+                except ValueError:
+                    kept.append(video)
+                    continue
+                if fetched.tzinfo is None:
+                    fetched = fetched.replace(tzinfo=timezone.utc)
+                if fetched < cutoff:
+                    kept.append(video)
+            videos = kept
+
+        if not videos:
+            return _err("Nothing matches that refetch scope.")
+        return self.refetch_videos([video["id"] for video in videos])
+
+    def cancel_job(self, job_id: str = "") -> dict:
+        with self._jobs_lock:
+            job = self._jobs.get(job_id or self._active_job_id)
+        if not job:
+            return _err("No such job.")
+        if job.status != "running":
+            return _ok(job=job.snapshot())
+        job.cancel_event.set()
+        if job.ingestor:
+            job.ingestor.cancel()
+        job.message = "Cancelling..."
+        return _ok(job=job.snapshot())
+
+    def get_job(self, job_id: str = "") -> dict:
+        with self._jobs_lock:
+            job = self._jobs.get(job_id or self._active_job_id)
+        return _ok(job=job.snapshot() if job else None)
+
+    # ----------------------------------------------------------------- reads
+
+    def get_videos(self, source_id: str = "") -> dict:
+        return _ok(videos=self._store.get_videos(source_id))
+
+    def get_sources(self) -> dict:
+        return _ok(sources=self._store.get_sources())
+
+    def get_transcript(self, video_id: str) -> dict:
+        return _ok(
+            segments=self._store.get_transcript(video_id),
+            video=self._store.get_video(video_id),
+        )
+
+    def search_transcripts(
+        self,
+        query: str,
+        source_id: str = "",
+        video_id: str = "",
+        limit: int = 300,
+        offset: int = 0,
+    ) -> dict:
+        try:
+            result = self._store.search_segments(
+                query, source_id=source_id, video_id=video_id, limit=limit, offset=offset
+            )
+        except SearchSyntaxError as exc:
+            return _err(str(exc))
+        return _ok(**result)
+
+    def get_missing_subtitles(self) -> dict:
+        return _ok(videos=self._store.get_missing_subtitles())
+
+    def get_stats(self) -> dict:
+        return _ok(stats=self._store.get_stats())
+
+    # --------------------------------------------------------------- deletes
+
+    def delete_video(self, video_id: str) -> dict:
+        self._store.delete_video(video_id)
+        return _ok()
+
+    def delete_all_videos(self) -> dict:
+        self._store.delete_all_videos()
+        return _ok()
+
+    def delete_source(self, source_id: str, delete_videos: bool = False) -> dict:
+        self._store.delete_source(source_id, delete_videos)
+        return _ok()
+
+    # ------------------------------------------------------------- lifecycle
+
+    def prepare_ytdlp(self) -> dict:
+        """Download or update yt-dlp in the background, reporting to the UI."""
+
+        def run() -> None:
+            try:
+                ensure_ytdlp(
+                    lambda message: self._push({"type": "ytdlp", "message": message})
+                )
+                self._push(
+                    {
+                        "type": "ytdlp",
+                        "message": "",
+                        "ready": True,
+                        "version": get_local_version() or "",
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001 - reported, not raised into the UI thread
+                self._push({"type": "ytdlp", "message": str(exc), "error": True})
+
+        threading.Thread(target=run, daemon=True, name="ytdlp-update").start()
+        return _ok()

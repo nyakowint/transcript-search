@@ -1,43 +1,63 @@
-"""yt-dlp binary manager: download and auto-update."""
+"""yt-dlp binary manager: download and auto-update.
+
+yt-dlp is shipped as a runtime-downloaded binary rather than a bundled
+dependency on purpose. YouTube changes its player often enough that a pinned
+copy goes stale within weeks, and self-updating the binary is far cheaper than
+rebuilding and redistributing the whole app every time that happens.
+"""
 
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable, Optional
 
 GITHUB_RELEASES_URL = "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest"
-DOWNLOAD_URL = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe"
+_RELEASE_BASE = "https://github.com/yt-dlp/yt-dlp/releases/latest/download"
 UPDATE_CHECK_INTERVAL_HOURS = 24
 
-# Hide console windows on Windows when running subprocess
 _SUBPROCESS_FLAGS = (
     getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
 )
 
 
+def _asset_name() -> str:
+    if sys.platform == "win32":
+        return "yt-dlp.exe"
+    if sys.platform == "darwin":
+        return "yt-dlp_macos"
+    return "yt-dlp_linux"
+
+
+def _binary_name() -> str:
+    return "yt-dlp.exe" if sys.platform == "win32" else "yt-dlp"
+
+
+def get_download_url() -> str:
+    return f"{_RELEASE_BASE}/{_asset_name()}"
+
+
 def get_data_dir() -> Path:
-    """Get the data directory (next to exe when frozen, next to script otherwise)."""
+    """Data directory: next to the executable when frozen, next to the source otherwise."""
     if getattr(sys, "frozen", False):
         return Path(sys.executable).parent / "data"
     return Path(__file__).resolve().parent / "data"
 
 
 def get_ytdlp_path() -> Path:
-    """Get the path to the yt-dlp binary."""
-    return get_data_dir() / "yt-dlp.exe"
+    return get_data_dir() / _binary_name()
 
 
 def get_version_file() -> Path:
-    """Get the path to the version cache file."""
     return get_data_dir() / ".ytdlp-version"
 
 
-def get_local_version() -> str | None:
-    """Get the version of the local yt-dlp binary."""
+def get_local_version() -> Optional[str]:
     ytdlp = get_ytdlp_path()
     if not ytdlp.exists():
         return None
@@ -46,30 +66,27 @@ def get_local_version() -> str | None:
             [str(ytdlp), "--version"],
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=30,
             creationflags=_SUBPROCESS_FLAGS,
         )
         return result.stdout.strip() if result.returncode == 0 else None
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return None
 
 
-def get_latest_version() -> str | None:
-    """Fetch the latest version tag from GitHub."""
+def get_latest_version() -> Optional[str]:
     try:
-        req = urllib.request.Request(
-            GITHUB_RELEASES_URL,
-            headers={"User-Agent": "caption-search"},
+        request = urllib.request.Request(
+            GITHUB_RELEASES_URL, headers={"User-Agent": "caption-search"}
         )
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode())
+        with urllib.request.urlopen(request, timeout=15) as response:
+            data = json.loads(response.read().decode())
             return data.get("tag_name", "").lstrip("v")
     except Exception:
         return None
 
 
 def should_check_update() -> bool:
-    """Check if enough time has passed since last update check."""
     version_file = get_version_file()
     if not version_file.exists():
         return True
@@ -83,83 +100,94 @@ def should_check_update() -> bool:
 
 
 def save_version_info(version: str) -> None:
-    """Save version and check timestamp."""
     version_file = get_version_file()
     version_file.parent.mkdir(parents=True, exist_ok=True)
-    data = {
-        "version": version,
-        "last_check": datetime.now(timezone.utc).isoformat(),
-    }
-    version_file.write_text(json.dumps(data))
+    version_file.write_text(
+        json.dumps(
+            {"version": version, "last_check": datetime.now(timezone.utc).isoformat()}
+        )
+    )
 
 
-def download_ytdlp(on_progress: callable = None) -> bool:
-    """Download yt-dlp.exe from GitHub."""
+def download_ytdlp(on_progress: Optional[Callable[[int, int], None]] = None) -> bool:
     ytdlp = get_ytdlp_path()
     ytdlp.parent.mkdir(parents=True, exist_ok=True)
     temp_path = ytdlp.with_suffix(".tmp")
-    
+
     try:
-        req = urllib.request.Request(
-            DOWNLOAD_URL,
-            headers={"User-Agent": "caption-search"},
+        request = urllib.request.Request(
+            get_download_url(), headers={"User-Agent": "caption-search"}
         )
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            total = int(resp.headers.get("Content-Length", 0))
+        with urllib.request.urlopen(request, timeout=120) as response:
+            total = int(response.headers.get("Content-Length", 0))
             downloaded = 0
-            with open(temp_path, "wb") as f:
-                while chunk := resp.read(65536):
-                    f.write(chunk)
+            with open(temp_path, "wb") as handle:
+                while chunk := response.read(65536):
+                    handle.write(chunk)
                     downloaded += len(chunk)
                     if on_progress and total:
                         on_progress(downloaded, total)
-        
-        # Replace old binary
+
         if ytdlp.exists():
             ytdlp.unlink()
         temp_path.rename(ytdlp)
-        
-        # Save version info
+        if sys.platform != "win32":
+            ytdlp.chmod(ytdlp.stat().st_mode | 0o111)
+
         version = get_local_version()
         if version:
             save_version_info(version)
-        
         return True
-    except Exception as e:
+    except Exception as exc:
         if temp_path.exists():
             temp_path.unlink()
-        raise RuntimeError(f"Failed to download yt-dlp: {e}")
+        raise RuntimeError(f"Failed to download yt-dlp: {exc}") from exc
 
 
-def ensure_ytdlp(on_status: callable = None) -> Path:
-    """Ensure yt-dlp is available and up-to-date. Returns path to binary."""
+def ensure_ytdlp(on_status: Optional[Callable[[str], None]] = None) -> Path:
+    """Make sure a usable yt-dlp exists, updating it at most once a day.
+
+    A failed update check is not fatal when a binary is already present -- the
+    app still works offline against whatever is on disk.
+    """
     ytdlp = get_ytdlp_path()
-    
+
+    def status(message: str) -> None:
+        if on_status:
+            on_status(message)
+
     if not ytdlp.exists():
-        if on_status:
-            on_status("Downloading yt-dlp...")
+        status("Downloading yt-dlp...")
         download_ytdlp()
-        if on_status:
-            on_status("yt-dlp ready")
+        status("yt-dlp ready")
         return ytdlp
-    
+
     if should_check_update():
-        if on_status:
-            on_status("Checking for yt-dlp updates...")
-        local_ver = get_local_version()
-        latest_ver = get_latest_version()
-        
-        if latest_ver and local_ver and latest_ver != local_ver:
-            if on_status:
-                on_status(f"Updating yt-dlp ({local_ver} → {latest_ver})...")
-            download_ytdlp()
-            if on_status:
-                on_status("yt-dlp updated")
+        status("Checking for yt-dlp updates...")
+        local_version = get_local_version()
+        latest_version = get_latest_version()
+        if latest_version and local_version and latest_version != local_version:
+            status(f"Updating yt-dlp ({local_version} -> {latest_version})...")
+            try:
+                download_ytdlp()
+                status("yt-dlp updated")
+            except RuntimeError as exc:
+                status(f"yt-dlp update failed, keeping {local_version}: {exc}")
         else:
-            # Save check timestamp even if no update needed
-            if local_ver:
-                save_version_info(local_ver)
-            if on_status:
-                on_status("yt-dlp is up to date")
-    
+            if local_version:
+                save_version_info(local_version)
+            status("yt-dlp is up to date")
+
     return ytdlp
+
+
+def resolve_ytdlp() -> str:
+    """Path to the yt-dlp to run.
+
+    ``CAPTION_SEARCH_YTDLP`` overrides it, which keeps tests and development off
+    the managed copy.
+    """
+    override = os.environ.get("CAPTION_SEARCH_YTDLP")
+    if override:
+        return override
+    return str(get_ytdlp_path())

@@ -1,56 +1,118 @@
 <script>
-  let { videos = [], missing = [], onselect, ondelete, ondeleteAll } = $props();
+  import { RefreshCw, X } from 'lucide-svelte';
+  import { formatDuration, formatUploadDate } from '../format.js';
 
-  function handleSelect(videoId) {
-    onselect?.({ detail: videoId });
-  }
+  let {
+    videos = [],
+    missing = [],
+    selectedVideoId = '',
+    busy = false,
+    onselect,
+    ondelete,
+    onrefetch,
+    ondeleteAll,
+    onrefetchAll,
+    onretryMissing,
+  } = $props();
 
-  function handleDelete(event, videoId) {
-    event.stopPropagation();
-    ondelete?.({ detail: videoId });
-  }
+  let filter = $state('');
 
-  function handleDeleteAll() {
-    ondeleteAll?.();
-  }
+  const filtered = $derived.by(() => {
+    const needle = filter.trim().toLowerCase();
+    if (!needle) return videos;
+    return videos.filter(
+      (video) =>
+        (video.title || '').toLowerCase().includes(needle) ||
+        (video.channel || '').toLowerCase().includes(needle)
+    );
+  });
+
+  // A big channel can hold thousands of rows; render a window of them and let
+  // the filter box reach the rest rather than paying for every node up front.
+  const RENDER_CAP = 300;
+  const visible = $derived(filtered.slice(0, RENDER_CAP));
+  const hiddenCount = $derived(Math.max(0, filtered.length - visible.length));
 </script>
 
 <div class="video-list">
   <div class="list-header">
     <span class="label">Videos ({videos.length})</span>
     {#if videos.length > 0}
-      <button class="btn-clear" type="button" onclick={handleDeleteAll}>Clear all</button>
+      <div class="header-actions">
+        <button
+          class="link"
+          type="button"
+          disabled={busy}
+          title="Refetch every stored video"
+          onclick={() => onrefetchAll?.()}
+        >Refetch all</button>
+        <button class="link danger" type="button" onclick={() => ondeleteAll?.()}>Clear</button>
+      </div>
     {/if}
   </div>
+
+  {#if videos.length > 8}
+    <input class="filter" type="text" bind:value={filter} placeholder="Filter videos..." />
+  {/if}
+
   <ul class="video-items">
     {#if videos.length === 0}
-      <li class="empty">No videos loaded.</li>
+      <li class="empty">No videos yet. Paste a channel or playlist above.</li>
+    {:else if filtered.length === 0}
+      <li class="empty">Nothing matches "{filter}".</li>
     {:else}
-      {#each videos as video}
-        <li>
-          <button type="button" class="video-btn" onclick={() => handleSelect(video.id)}>
-            <span class="video-title">{video.title || video.id}</span>
+      {#each visible as video (video.id)}
+        <li class:active={video.id === selectedVideoId}>
+          <button type="button" class="video-btn" onclick={() => onselect?.(video.id)}>
+            <span class="video-title" title={video.title || video.id}>
+              {video.title || video.id}
+            </span>
             <span class="video-meta">
-              {video.channel || ''}
-              <span class="pill">{video.subtitle_type}</span>
+              <span class="pill" class:auto={video.subtitle_type === 'auto'} class:none={video.subtitle_type === 'none'}>
+                {video.subtitle_type === 'none'
+                  ? 'no captions'
+                  : `${video.subtitle_type} · ${video.subtitle_language}`}
+              </span>
+              {#if video.duration}<span>{formatDuration(video.duration)}</span>{/if}
+              {#if video.upload_date}<span>{formatUploadDate(video.upload_date)}</span>{/if}
             </span>
           </button>
-          <button
-            type="button"
-            class="btn-delete"
-            onclick={(e) => handleDelete(e, video.id)}
-          >✕</button>
+          <div class="row-actions">
+            <button
+              type="button"
+              title="Refetch captions"
+              disabled={busy}
+              onclick={() => onrefetch?.(video.id)}
+            >
+              <RefreshCw size={12} />
+            </button>
+            <button type="button" title="Remove" onclick={() => ondelete?.(video.id)}>
+              <X size={13} />
+            </button>
+          </div>
         </li>
       {/each}
+      {#if hiddenCount > 0}
+        <li class="more">+{hiddenCount} more — use the filter to narrow down</li>
+      {/if}
     {/if}
   </ul>
 
   {#if missing.length > 0}
     <div class="missing-section">
-      <span class="label">Missing subtitles ({missing.length})</span>
+      <div class="list-header">
+        <span class="label">No captions ({missing.length})</span>
+        <button
+          class="link"
+          type="button"
+          disabled={busy}
+          title="Uploaders sometimes add captions later"
+          onclick={() => onretryMissing?.()}
+        >Retry</button>
+      </div>
       <ul class="missing-items">
-        {#each missing as video}
-          <li>{video.title || video.id}</li>
+        {#each missing.slice(0, 50) as video}
+          <li title={video.error || ''}>{video.title || video.id}</li>
         {/each}
       </ul>
     </div>
@@ -70,6 +132,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 8px;
     flex-shrink: 0;
   }
 
@@ -81,17 +144,41 @@
     color: var(--text-muted);
   }
 
-  .btn-clear {
+  .header-actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  .link {
     background: transparent;
     border: none;
     color: var(--text-muted);
     font-size: 11px;
     cursor: pointer;
-    padding: 2px 6px;
+    padding: 2px 0;
   }
 
-  .btn-clear:hover {
+  .link:hover:not(:disabled) {
+    color: var(--text);
+  }
+
+  .link.danger:hover {
     color: var(--error);
+  }
+
+  .link:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  .filter {
+    background: var(--bg-input);
+    border: 1px solid var(--border-input);
+    color: var(--text);
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    flex-shrink: 0;
   }
 
   .video-items {
@@ -106,12 +193,16 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 8px 6px;
+    padding: 7px 6px;
     border-radius: 6px;
   }
 
   .video-items li:hover {
     background: var(--border);
+  }
+
+  .video-items li.active {
+    background: var(--accent-subtle);
   }
 
   .video-btn {
@@ -122,7 +213,7 @@
     text-align: left;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 3px;
     cursor: pointer;
     padding: 0;
     min-width: 0;
@@ -139,37 +230,61 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 11px;
+    font-size: 10px;
     color: var(--text-muted);
   }
 
   .pill {
-    background: var(--border-input);
-    color: var(--text-secondary);
+    background: var(--success-subtle);
+    color: var(--success);
     font-size: 10px;
     padding: 1px 5px;
     border-radius: 4px;
   }
 
-  .btn-delete {
-    background: transparent;
-    border: none;
-    color: var(--text-muted);
-    font-size: 12px;
-    cursor: pointer;
-    padding: 2px 4px;
-    opacity: 0;
+  .pill.auto {
+    background: var(--border-input);
+    color: var(--text-secondary);
   }
 
-  li:hover .btn-delete {
-    opacity: 1;
-  }
-
-  .btn-delete:hover {
+  .pill.none {
+    background: var(--error-subtle);
     color: var(--error);
   }
 
-  .empty {
+  .row-actions {
+    display: flex;
+    gap: 1px;
+    opacity: 0;
+    flex-shrink: 0;
+  }
+
+  li:hover .row-actions {
+    opacity: 1;
+  }
+
+  .row-actions button {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 3px;
+    border-radius: 4px;
+    display: flex;
+  }
+
+  .row-actions button:hover:not(:disabled) {
+    color: var(--text);
+    background: var(--bg-input);
+  }
+
+  .row-actions button:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  .empty,
+  .more {
     color: var(--text-muted);
     font-size: 12px;
     padding: 8px 4px;
@@ -177,22 +292,28 @@
 
   .missing-section {
     border-top: 1px solid var(--border);
-    padding-top: 12px;
-    margin-top: 8px;
+    padding-top: 10px;
+    margin-top: 4px;
     flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
   }
 
   .missing-items {
     list-style: none;
     padding: 0;
-    margin: 6px 0 0;
-    max-height: 120px;
+    margin: 0;
+    max-height: 110px;
     overflow-y: auto;
   }
 
   .missing-items li {
-    font-size: 12px;
+    font-size: 11px;
     color: var(--text-muted);
-    padding: 3px 4px;
+    padding: 2px 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 </style>

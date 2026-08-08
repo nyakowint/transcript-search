@@ -3,7 +3,8 @@
     "dev": "deno task build && python app.py",
     "build": "deno run -A npm:vite build",
     "build:exe": "deno task build && pyinstaller caption-search.spec --distpath build/app --workpath build/pyinstaller --noconfirm",
-    "preview": "deno run -A npm:vite preview"
+    "preview": "deno run -A npm:vite preview",
+    "test": "python -m unittest discover -s tests"
   },
   "imports": {
     "vite": "npm:vite@^6.0.0",

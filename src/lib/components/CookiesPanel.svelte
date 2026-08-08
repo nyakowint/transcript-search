@@ -9,32 +9,39 @@
     { label: 'Brave', value: 'brave' },
     { label: 'Vivaldi', value: 'vivaldi' },
     { label: 'Opera', value: 'opera' },
+    { label: 'Chromium', value: 'chromium' },
+    { label: 'Safari', value: 'safari' },
   ];
 
-  function handleChange() {
-    onchange?.({ detail: { cookiesPath, cookiesBrowser } });
+  function emit(patch) {
+    onchange?.({ cookies_path: cookiesPath, cookies_browser: cookiesBrowser, ...patch });
   }
 </script>
 
 <div class="cookies">
+  <p class="hint">
+    Only needed for age-restricted, members-only, or rate-limited fetches.
+  </p>
   <div class="field">
-    <label for="cookies-path">Cookies file (optional)</label>
+    <label for="cookies-path">Cookies file</label>
     <div class="input-group">
       <input
         id="cookies-path"
         type="text"
         bind:value={cookiesPath}
-        onchange={handleChange}
-        placeholder="Paste cookies file path or browse..."
+        onchange={() => emit({ cookies_path: cookiesPath })}
+        placeholder="Path to cookies.txt"
       />
-      <button class="secondary" type="button" onclick={() => onbrowse?.()}>
-        Browse
-      </button>
+      <button class="secondary" type="button" onclick={() => onbrowse?.()}>Browse</button>
     </div>
   </div>
   <div class="field">
-    <label for="cookies-browser">Or import cookies from browser</label>
-    <select id="cookies-browser" bind:value={cookiesBrowser} onchange={handleChange}>
+    <label for="cookies-browser">Or read cookies from a browser</label>
+    <select
+      id="cookies-browser"
+      bind:value={cookiesBrowser}
+      onchange={() => emit({ cookies_browser: cookiesBrowser })}
+    >
       {#each browsers as browser}
         <option value={browser.value}>{browser.label}</option>
       {/each}
@@ -47,6 +54,13 @@
     display: flex;
     flex-direction: column;
     gap: 10px;
+  }
+
+  .hint {
+    margin: 0;
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.4;
   }
 
   .field label {
@@ -64,6 +78,7 @@
     border: 1px solid var(--border-input);
     background: var(--bg-input);
     color: var(--text);
+    font-size: 13px;
   }
 
   .input-group {
@@ -79,6 +94,7 @@
     padding: 8px 12px;
     border-radius: 8px;
     cursor: pointer;
+    font-size: 13px;
   }
 
   .secondary:hover {

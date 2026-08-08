@@ -7,7 +7,10 @@ a = Analysis(
     ['app.py'],
     pathex=[],
     binaries=[],
-    datas=[('build/ui', 'build/ui')],
+    datas=[
+        ('build/ui', 'build/ui'),
+        ('src/public/favicon.ico', 'src/public'),
+    ],
     hiddenimports=['clr_loader', 'pythonnet'],
     hookspath=[],
     hooksconfig={},
