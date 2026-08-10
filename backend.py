@@ -20,7 +20,7 @@ from typing import Callable, Optional
 
 from ingest import Ingestor, IngestOptions, build_targets
 from store import CaptionStore, SearchSyntaxError
-from ytdlp_manager import ensure_ytdlp, get_local_version, resolve_ytdlp
+from ytdlp_manager import ensure_ytdlp, get_data_dir, get_local_version, resolve_ytdlp
 from ytdlp_url import CHANNEL_TABS, Target
 
 SETTING_KEYS = (
@@ -125,7 +125,10 @@ def _err(message: str) -> dict:
 
 class Api:
     def __init__(self, data_dir: Path | None = None) -> None:
-        self._data_dir = data_dir or (Path(__file__).resolve().parent / "data")
+        # Shared with the yt-dlp manager rather than derived from __file__: in a
+        # frozen build __file__ points inside the bundle, which is a temporary
+        # directory under one-file and would throw the database away on exit.
+        self._data_dir = data_dir or get_data_dir()
         self._data_dir.mkdir(parents=True, exist_ok=True)
         self._store = CaptionStore(self._data_dir / "captions.db")
         self._window = None

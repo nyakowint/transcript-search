@@ -15,9 +15,12 @@ input can be a single video, playlist, list of videos (untested) or entire chann
   - See [the yt-dlp FAQ](https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp) for how to get this file.
   - If you use any program that already keeps a youtube_cookies.txt or equivalent file, you can point it at that same file. (e.g. VRCVideoCacher)
 
-For Windows grab the [latest release](../../releases) or build artifact (latest commit)
+Grab the [latest release](../../releases) for Windows, macOS (Intel + Apple Silicon)
+or Linux x64 (every commit will have a artifact + pre-release). no installer, its all in one executable.
 
-For macOS/Linux just build it yourself like you guys love doing so much anyway (sarcasm)
+- macOS: it's unsigned, so run `xattr -dr com.apple.quarantine "Caption Search.app"`
+  after unpacking or Gatekeeper won't let it open (typical mapple behavior)
+- Linux: you need GTK 3 + WebKit2GTK 4.0
 
 (app is called Caption search but repo is called transcript search cuz uhh i was indecisive at one point)
 
@@ -43,6 +46,12 @@ For macOS/Linux just build it yourself like you guys love doing so much anyway (
 
 Set `CAPTION_SEARCH_YTDLP` to point at an existing yt-dlp binary if you don't
 want the app managing its own copy.
+
+The database and yt-dlp live in `data/` next to the exe on Windows (so it stays
+portable), `~/Library/Application Support/Caption Search` on macOS and
+`~/.local/share/caption-search` on Linux. 
+
+Set `CAPTION_SEARCH_DATA_DIR` to use your own dir
 
 latest webslop made for myself!
 

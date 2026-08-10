@@ -43,10 +43,30 @@ def get_download_url() -> str:
 
 
 def get_data_dir() -> Path:
-    """Data directory: next to the executable when frozen, next to the source otherwise."""
-    if getattr(sys, "frozen", False):
+    """Where the database, cookies and yt-dlp binary live.
+
+    From source it is always ``data/`` beside the code. Frozen builds differ by
+    platform: Windows stays portable next to the .exe, while macOS and Linux
+    use the per-user data directory because the app there may sit in a
+    read-only location (inside a .app bundle, or ``/usr/local/bin``).
+
+    ``CAPTION_SEARCH_DATA_DIR`` overrides all of it.
+    """
+    override = os.environ.get("CAPTION_SEARCH_DATA_DIR")
+    if override:
+        return Path(override).expanduser()
+
+    if not getattr(sys, "frozen", False):
+        return Path(__file__).resolve().parent / "data"
+
+    if sys.platform == "win32":
         return Path(sys.executable).parent / "data"
-    return Path(__file__).resolve().parent / "data"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "Caption Search"
+
+    xdg = os.environ.get("XDG_DATA_HOME")
+    base = Path(xdg).expanduser() if xdg else Path.home() / ".local" / "share"
+    return base / "caption-search"
 
 
 def get_ytdlp_path() -> Path:

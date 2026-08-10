@@ -7,14 +7,48 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
-    runs-on: windows-latest
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: windows-x64
+            python: python
+          - os: macos-latest
+            target: macos-arm64
+            python: python
+          - os: macos-13
+            target: macos-x64
+            python: python
+          - os: ubuntu-22.04
+            target: linux-x64
+            python: python3
+
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install GTK/WebKit dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            python3-gi python3-gi-cairo python3-pip \
+            gir1.2-gtk-3.0 gir1.2-webkit2-4.0 libwebkit2gtk-4.0-37
+
+      # Skipped on Linux: a setup-python interpreter cannot see apt's python3-gi.
       - name: Set up Python
+        if: runner.os != 'Linux'
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -26,20 +60,92 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pip install -r requirements.txt
-          pip install pyinstaller
+          ${{ matrix.python }} -m pip install --upgrade pip
+          ${{ matrix.python }} -m pip install -r requirements.txt
+          ${{ matrix.python }} -m pip install pyinstaller
 
       - name: Run tests
-        run: python -m unittest discover -s tests
+        run: ${{ matrix.python }} -m unittest discover -s tests
 
       - name: Build UI
         run: deno task build
 
       - name: Build executable
-        run: pyinstaller caption-search.spec --distpath build/app --workpath build/pyinstaller --noconfirm
+        run: ${{ matrix.python }} -m PyInstaller caption-search.spec --distpath build/app --workpath build/pyinstaller --noconfirm
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          mkdir -p release
+          cp build/app/caption-search.exe release/caption-search-windows-x64.exe
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p release
+          cp build/app/caption-search release/caption-search-linux-x64
+          chmod +x release/caption-search-linux-x64
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p release
+          cp build/app/caption-search "release/caption-search-${{ matrix.target }}"
+          chmod +x "release/caption-search-${{ matrix.target }}"
+          tar -C build/app -czf "release/caption-search-${{ matrix.target }}.app.tar.gz" "Caption Search.app"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: caption-search-windows
-          path: build/app/caption-search/
+          name: release-${{ matrix.target }}
+          path: release/
+          if-no-files-found: error
+
+  prerelease:
+    name: Pre-release
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release
+
+      - name: Publish pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="build-${{ github.run_number }}-$(git rev-parse --short HEAD)"
+          ls -la release
+          gh release create "$tag" release/* \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --title "Build ${{ github.run_number }} ($(git rev-parse --short HEAD))" \
+            --notes "$(cat <<'EOF'
+          Automated build. Unsigned, so both non-Windows platforms need a nudge before they will run.
+
+          | File | Platform |
+          | --- | --- |
+          | `caption-search-windows-x64.exe` | Windows 10/11 x64 |
+          | `caption-search-macos-arm64.app.tar.gz` | macOS, Apple Silicon |
+          | `caption-search-macos-x64.app.tar.gz` | macOS, Intel |
+          | `caption-search-linux-x64` | Linux x64, glibc 2.35+ |
+
+          The bare `caption-search-macos-*` binaries are the same build without the
+          `.app` wrapper, for launching from a terminal.
+
+          **macOS:** `xattr -dr com.apple.quarantine "Caption Search.app"` after
+          unpacking, otherwise Gatekeeper refuses an unsigned app.
+
+          **Linux:** `chmod +x caption-search-linux-x64`. Needs GTK 3 and
+          WebKit2GTK 4.0 installed (`libwebkit2gtk-4.0-37` on Debian/Ubuntu).
+          EOF
+          )"
