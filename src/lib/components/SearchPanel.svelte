@@ -219,6 +219,9 @@
     border: 1px solid var(--border);
     border-radius: 10px;
     overflow: hidden;
+    /* The results list is a flex column, so without this every card shrinks to
+       share the visible height and clips its own hits instead of scrolling. */
+    flex-shrink: 0;
   }
 
   .group-head {
@@ -266,9 +269,14 @@
   .hit {
     display: grid;
     grid-template-columns: 56px 1fr auto;
-    gap: 10px;
+    gap: 12px;
     align-items: start;
-    padding: 8px 14px;
+    padding: 12px 14px;
+  }
+
+  /* Hairline between hits so a wrapped line never reads as the next result. */
+  .hit + .hit {
+    border-top: 1px solid var(--border);
   }
 
   .hit:hover {
@@ -284,6 +292,7 @@
     padding: 0;
     cursor: pointer;
     text-align: left;
+    line-height: 1.6;
   }
 
   .time:hover {
@@ -291,16 +300,17 @@
   }
 
   .text {
-    color: var(--text-secondary);
-    font-size: 13px;
-    line-height: 1.5;
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.6;
   }
 
   mark {
     background: var(--mark-bg);
     color: var(--mark-text);
-    border-radius: 2px;
-    padding: 0 1px;
+    border-radius: 3px;
+    padding: 1px 3px;
+    font-weight: 600;
   }
 
   .actions {
