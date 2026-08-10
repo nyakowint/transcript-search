@@ -24,7 +24,7 @@ jobs:
           - os: macos-latest
             target: macos-arm64
             python: python
-          - os: macos-13
+          - os: macos-latest
             target: macos-x64
             python: python
           - os: ubuntu-22.04
