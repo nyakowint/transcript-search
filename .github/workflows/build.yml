@@ -71,28 +71,28 @@ jobs:
         run: deno task build
 
       - name: Build executable
-        run: ${{ matrix.python }} -m PyInstaller caption-search.spec --distpath build/app --workpath build/pyinstaller --noconfirm
+        run: ${{ matrix.python }} -m PyInstaller transcript-search.spec --distpath build/app --workpath build/pyinstaller --noconfirm
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
         run: |
           mkdir -p release
-          cp build/app/caption-search.exe release/caption-search-windows-x64.exe
+          cp build/app/transcript-search.exe release/transcript-search-windows-x64.exe
 
       - name: Package (Linux)
         if: runner.os == 'Linux'
         run: |
           mkdir -p release
-          cp build/app/caption-search release/caption-search-linux-x64
-          chmod +x release/caption-search-linux-x64
+          cp build/app/transcript-search release/transcript-search-linux-x64
+          chmod +x release/transcript-search-linux-x64
 
       - name: Package (macOS)
         if: runner.os == 'macOS'
         run: |
           mkdir -p release
-          cp build/app/caption-search "release/caption-search-${{ matrix.target }}"
-          chmod +x "release/caption-search-${{ matrix.target }}"
-          tar -C build/app -czf "release/caption-search-${{ matrix.target }}.app.tar.gz" "Caption Search.app"
+          cp build/app/transcript-search "release/transcript-search-${{ matrix.target }}"
+          chmod +x "release/transcript-search-${{ matrix.target }}"
+          tar -C build/app -czf "release/transcript-search-${{ matrix.target }}.app.tar.gz" "Transcript Search.app"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -130,22 +130,19 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "Build ${{ github.run_number }} ($(git rev-parse --short HEAD))" \
             --notes "$(cat <<'EOF'
-          Automated build. Unsigned, so both non-Windows platforms need a nudge before they will run.
+          Automatic unsigned build, so you might get a smartscreen/gatekeeper warning
 
           | File | Platform |
           | --- | --- |
-          | `caption-search-windows-x64.exe` | Windows 10/11 x64 |
-          | `caption-search-macos-arm64.app.tar.gz` | macOS, Apple Silicon |
-          | `caption-search-macos-x64.app.tar.gz` | macOS, Intel |
-          | `caption-search-linux-x64` | Linux x64, glibc 2.35+ |
+          | `transcript-search-windows-x64.exe` | Windows 10/11 x64 |
+          | `transcript-search-macos-arm64.app.tar.gz` | macOS, Apple Silicon |
+          | `transcript-search-macos-x64.app.tar.gz` | macOS, Intel |
+          | `transcript-search-linux-x64` | Linux x64, glibc 2.35+ |
 
-          The bare `caption-search-macos-*` binaries are the same build without the
-          `.app` wrapper, for launching from a terminal.
-
-          **macOS:** `xattr -dr com.apple.quarantine "Caption Search.app"` after
+          **macOS:** `xattr -dr com.apple.quarantine "Transcript Search.app"` after
           unpacking, otherwise Gatekeeper refuses an unsigned app.
 
-          **Linux:** `chmod +x caption-search-linux-x64`. Needs GTK 3 and
+          **Linux:** `chmod +x transcript-search-linux-x64`. Needs GTK 3 and
           WebKit2GTK 4.0 installed (`libwebkit2gtk-4.0-37` on Debian/Ubuntu).
           EOF
           )"

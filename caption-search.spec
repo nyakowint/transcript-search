@@ -55,7 +55,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='caption-search',
+    name='transcript-search',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -79,7 +79,7 @@ if is_macos:
     # wrapper around that same one-file binary.
     app = BUNDLE(
         exe,
-        name='Caption Search.app',
+        name='Transcript Search.app',
         icon=None,
         bundle_identifier='com.github.transcript-search',
         info_plist={

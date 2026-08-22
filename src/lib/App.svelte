@@ -359,7 +359,7 @@
 
     <section class="hero">
       <div class="hero-head">
-        <h1>Caption Search</h1>
+        <h1>Transcript Search</h1>
         {#if hasContent}
           <p class="subtitle">
             {stats.videos} videos · {stats.segments.toLocaleString()} lines

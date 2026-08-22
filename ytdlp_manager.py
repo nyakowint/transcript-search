@@ -62,11 +62,11 @@ def get_data_dir() -> Path:
     if sys.platform == "win32":
         return Path(sys.executable).parent / "data"
     if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "Caption Search"
+        return Path.home() / "Library" / "Application Support" / "Transcript Search"
 
     xdg = os.environ.get("XDG_DATA_HOME")
     base = Path(xdg).expanduser() if xdg else Path.home() / ".local" / "share"
-    return base / "caption-search"
+    return base / "transcript-search"
 
 
 def get_ytdlp_path() -> Path:
@@ -97,7 +97,7 @@ def get_local_version() -> Optional[str]:
 def get_latest_version() -> Optional[str]:
     try:
         request = urllib.request.Request(
-            GITHUB_RELEASES_URL, headers={"User-Agent": "caption-search"}
+            GITHUB_RELEASES_URL, headers={"User-Agent": "transcript-search"}
         )
         with urllib.request.urlopen(request, timeout=15) as response:
             data = json.loads(response.read().decode())
@@ -136,7 +136,7 @@ def download_ytdlp(on_progress: Optional[Callable[[int, int], None]] = None) -> 
 
     try:
         request = urllib.request.Request(
-            get_download_url(), headers={"User-Agent": "caption-search"}
+            get_download_url(), headers={"User-Agent": "transcript-search"}
         )
         with urllib.request.urlopen(request, timeout=120) as response:
             total = int(response.headers.get("Content-Length", 0))

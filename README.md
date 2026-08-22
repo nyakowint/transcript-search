@@ -18,7 +18,7 @@ input can be a single video, playlist, list of videos (untested) or entire chann
 Grab the [latest release](../../releases) for Windows, macOS (Intel + Apple Silicon)
 or Linux x64 (every commit will have a artifact + pre-release). no installer, its all in one executable.
 
-- macOS: it's unsigned, so run `xattr -dr com.apple.quarantine "Caption Search.app"`
+- macOS: it's unsigned, so run `xattr -dr com.apple.quarantine "Transcript Search.app"`
   after unpacking or Gatekeeper won't let it open (typical mapple behavior)
 - Linux: you need GTK 3 + WebKit2GTK 4.0
 
@@ -44,12 +44,12 @@ or Linux x64 (every commit will have a artifact + pre-release). no installer, it
    python app.py
    ```
 
-Set `CAPTION_SEARCH_YTDLP` to point at an existing yt-dlp binary if you don't
+Set `TRANSCRIPT_SEARCH_YTDLP` to point at an existing yt-dlp binary if you don't
 want the app managing its own copy.
 
 The database and yt-dlp live in `data/` next to the exe on Windows (so it stays
-portable), `~/Library/Application Support/Caption Search` on macOS and
-`~/.local/share/caption-search` on Linux. 
+portable), `~/Library/Application Support/Transcript Search` on macOS and
+`~/.local/share/transcript-search` on Linux. 
 
 Set `CAPTION_SEARCH_DATA_DIR` to use your own dir
 

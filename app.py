@@ -30,7 +30,7 @@ def main() -> None:
     icon_path = root / "src" / "public" / "favicon.ico"
     api = Api()
     window = webview.create_window(
-        "Caption Search",
+        "Transcript Search",
         url=str(ui_path),
         js_api=api,
         width=1280,
