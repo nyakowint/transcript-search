@@ -50,9 +50,9 @@ def get_data_dir() -> Path:
     use the per-user data directory because the app there may sit in a
     read-only location (inside a .app bundle, or ``/usr/local/bin``).
 
-    ``CAPTION_SEARCH_DATA_DIR`` overrides all of it.
+    ``TRANSCRIPT_SEARCH_DATA_DIR`` overrides all of it.
     """
-    override = os.environ.get("CAPTION_SEARCH_DATA_DIR")
+    override = os.environ.get("TRANSCRIPT_SEARCH_DATA_DIR")
     if override:
         return Path(override).expanduser()
 

@@ -51,7 +51,7 @@ The database and yt-dlp live in `data/` next to the exe on Windows (so it stays
 portable), `~/Library/Application Support/Transcript Search` on macOS and
 `~/.local/share/transcript-search` on Linux. 
 
-Set `CAPTION_SEARCH_DATA_DIR` to use your own dir
+Set `TRANSCRIPT_SEARCH_DATA_DIR` to use your own dir
 
 latest webslop made for myself!
 
