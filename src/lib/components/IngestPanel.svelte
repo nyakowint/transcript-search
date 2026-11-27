@@ -52,11 +52,13 @@
 </script>
 
 <div class="ingest">
+  <!-- svelte-ignore a11y_autofocus -- it only ever renders inside the add dialog -->
   <textarea
     bind:value={urlsInput}
     onkeydown={handleKeydown}
     placeholder={t('ingest.urlsPlaceholder')}
-    rows="3"
+    rows="5"
+    autofocus
   ></textarea>
 
   <button class="primary" onclick={submit} disabled={busy || !urlsInput.trim()}>

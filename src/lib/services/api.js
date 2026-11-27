@@ -80,15 +80,11 @@ export const apiClient = {
   getTranscript: (videoId) => call('get_transcript', videoId),
   getMissing: () => call('get_missing_subtitles'),
   getStats: () => call('get_stats'),
-  searchTranscripts: (query, options = {}) =>
-    call(
-      'search_transcripts',
-      query,
-      options.sourceId ?? '',
-      options.videoId ?? '',
-      options.limit ?? 300,
-      options.offset ?? 0
-    ),
+  searchTranscripts: (query, options = {}) => call('search_transcripts', query, options),
+  exportSearch: (query, options, format) => call('export_search', query, options, format),
+  getRecentSearches: () => call('get_recent_searches'),
+  addRecentSearch: (query) => call('add_recent_search', query),
+  clearRecentSearches: () => call('clear_recent_searches'),
 
   // deletes
   deleteVideo: (videoId) => call('delete_video', videoId),

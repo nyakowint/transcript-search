@@ -13,160 +13,132 @@
 </script>
 
 {#if sources.length > 0}
-  <div class="sources">
-    <span class="label">{t('sources.label')}</span>
-    <ul>
-      <li class:active={activeSourceId === ''}>
-        <button class="pick" type="button" onclick={() => onselect?.('')}>
-          <span class="name">{t('sources.allSources')}</span>
-        </button>
-      </li>
-      {#each sources as source}
-        <li class:active={activeSourceId === source.id}>
-          <button class="pick" type="button" onclick={() => onselect?.(source.id)}>
-            <span class="icon">
-              {#if source.kind === 'channel'}
-                <Radio size={13} />
-              {:else}
-                <ListVideo size={13} />
-              {/if}
-            </span>
-            <span class="name" title={source.title || source.id}>
-              {source.title || source.id}
-            </span>
+  <section class="sources">
+    <h2>{t('sources.label')}</h2>
+    <div class="chips">
+      <button class="chip" class:active={activeSourceId === ''} type="button" onclick={() => onselect?.('')}>
+        {t('sources.allSources')}
+      </button>
+      {#each sources as source (source.id)}
+        <div class="chip" class:active={activeSourceId === source.id}>
+          <button class="pick" type="button" title={source.url} onclick={() => onselect?.(source.id)}>
+            {#if source.kind === 'channel'}<Radio size={13} />{:else}<ListVideo size={13} />{/if}
+            <span class="name">{source.title || source.id}</span>
             <span class="count">{source.video_count}</span>
           </button>
-          <div class="row-actions">
-            <button
-              type="button"
-              title={t('sources.checkForNew')}
-              disabled={busy}
-              onclick={() => onsync?.(source.id, false)}
-            >
-              <RefreshCw size={13} />
-            </button>
-            <button
-              type="button"
-              title={t('sources.removeSource')}
-              onclick={() => ondelete?.(source)}
-            >
-              <Trash2 size={13} />
-            </button>
-          </div>
-        </li>
+          <button
+            class="icon"
+            type="button"
+            title={t('sources.checkForNew')}
+            disabled={busy}
+            onclick={() => onsync?.(source.id, false)}
+          >
+            <RefreshCw size={12} />
+          </button>
+          <button class="icon" type="button" title={t('sources.removeSource')} onclick={() => ondelete?.(source)}>
+            <Trash2 size={12} />
+          </button>
+        </div>
       {/each}
-    </ul>
-  </div>
+    </div>
+  </section>
 {/if}
 
 <style>
   .sources {
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    flex-shrink: 0;
+    gap: 10px;
   }
 
-  .label {
-    font-size: 11px;
+  h2 {
+    margin: 0;
+    font-size: 12px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
     color: var(--text-muted);
   }
 
-  ul {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    max-height: 200px;
-    overflow-y: auto;
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
   }
 
-  li {
+  .chip {
     display: flex;
     align-items: center;
-    gap: 4px;
-    border-radius: 6px;
-    padding: 2px 4px;
+    gap: 2px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 13px;
+    padding: 0 4px 0 0;
+    max-width: 100%;
   }
 
-  li:hover {
-    background: var(--border);
+  button.chip {
+    padding: 6px 12px;
+    cursor: pointer;
   }
 
-  li.active {
+  .chip:hover {
+    border-color: var(--border-input);
+  }
+
+  .chip.active {
+    border-color: var(--accent);
     background: var(--accent-subtle);
   }
 
   .pick {
-    flex: 1;
     display: flex;
     align-items: center;
     gap: 7px;
+    min-width: 0;
     background: none;
     border: none;
-    color: var(--text);
+    color: inherit;
+    font-size: 13px;
+    padding: 6px 6px 6px 10px;
     cursor: pointer;
-    padding: 5px 2px;
-    min-width: 0;
-    text-align: left;
   }
 
-  .icon {
-    display: flex;
+  .pick :global(svg) {
     color: var(--text-muted);
     flex-shrink: 0;
-  }
-
-  li.active .icon {
-    color: var(--accent);
   }
 
   .name {
-    font-size: 12px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    flex: 1;
+    max-width: 260px;
   }
 
   .count {
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-muted);
-    background: var(--border-input);
-    border-radius: 10px;
-    padding: 1px 6px;
-    flex-shrink: 0;
   }
 
-  .row-actions {
-    display: flex;
-    gap: 2px;
-    opacity: 0;
-    flex-shrink: 0;
-  }
-
-  li:hover .row-actions {
-    opacity: 1;
-  }
-
-  .row-actions button {
+  .icon {
     background: none;
     border: none;
     color: var(--text-muted);
-    cursor: pointer;
     padding: 4px;
     border-radius: 4px;
+    cursor: pointer;
     display: flex;
   }
 
-  .row-actions button:hover:not(:disabled) {
+  .icon:hover:not(:disabled) {
     color: var(--text);
-    background: var(--bg-input);
+    background: var(--border);
   }
 
-  .row-actions button:disabled {
+  .icon:disabled {
     opacity: 0.4;
     cursor: default;
   }

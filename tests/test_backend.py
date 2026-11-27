@@ -11,6 +11,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from backend import RECENT_SEARCH_LIMIT, Api, _export_csv, _export_markdown  # noqa: E402
 from captions import parse_json3, parse_vtt, select_track  # noqa: E402
 from ingest import IngestOptions, build_targets  # noqa: E402
 from store import CaptionStore, SearchSyntaxError, build_fts_query  # noqa: E402
@@ -254,15 +255,24 @@ class UrlClassificationTests(unittest.TestCase):
 
 
 class FtsQueryTests(unittest.TestCase):
-    def test_bare_words_become_anded_prefixes(self):
-        self.assertEqual(build_fts_query("neural network"), '"neural"* "network"*')
+    def test_phrase_mode_quotes_the_whole_input(self):
+        self.assertEqual(build_fts_query('neural "network"'), '"neural network"')
 
-    def test_quoted_run_stays_a_phrase(self):
-        self.assertEqual(build_fts_query('"neural network" learn'), '"neural network" "learn"*')
+    def test_phrase_mode_prefixes_only_the_last_word(self):
+        self.assertEqual(build_fts_query("neural netw", whole_words=False), '"neural netw"*')
+
+    def test_all_mode_ands_whole_words(self):
+        self.assertEqual(build_fts_query("neural network", "all"), '"neural" "network"')
+
+    def test_all_mode_prefixes_bare_words(self):
+        self.assertEqual(
+            build_fts_query('"neural network" learn', "all", whole_words=False),
+            '"neural network" "learn"*',
+        )
 
     def test_operators_are_searched_literally(self):
         """The search box is not a query language; AND/NEAR are just words."""
-        self.assertEqual(build_fts_query("AND NEAR"), '"AND"* "NEAR"*')
+        self.assertEqual(build_fts_query("AND NEAR", "all"), '"AND" "NEAR"')
 
     def test_empty_query_rejected(self):
         with self.assertRaises(SearchSyntaxError):
@@ -295,33 +305,96 @@ class StoreTests(unittest.TestCase):
         ]
         return self.store.upsert_video(video, segments, source_ids)
 
+    def hits(self, query, **options):
+        return self.store.search(query, **options)["total_hits"]
+
+    def hit_starts(self, query, **options):
+        result = self.store.search(query, **options)
+        return [hit["start_ms"] for video in result["videos"] for hit in video["hits"]]
+
     def test_search_finds_and_highlights(self):
         self.add_video(texts=("a neural network intro",))
-        result = self.store.search_segments("neural")
-        self.assertEqual(result["total"], 1)
-        self.assertIn("\x02neural\x03", result["results"][0]["highlight"])
+        result = self.store.search("neural")
+        self.assertEqual(result["total_hits"], 1)
+        self.assertIn("\x02neural\x03", result["videos"][0]["hits"][0]["highlight"])
 
-    def test_terms_must_share_a_segment(self):
-        self.add_video(texts=("neural nets", "gradient descent"))
-        self.assertEqual(self.store.search_segments("neural gradient")["total"], 0)
-        self.assertEqual(self.store.search_segments("neural nets")["total"], 1)
+    def test_phrase_spanning_cues_is_found_once_at_its_first_cue(self):
+        self.add_video(texts=("so I said", "I don't think", "that's right at all", "ok"))
+        self.assertEqual(self.hit_starts("I don't think that's right"), [1000])
+        self.assertEqual(self.hit_starts("said I don't think that's"), [0])
 
-    def test_search_can_be_scoped_to_a_source(self):
-        self.add_video("v1", ("shared word",), ("src1",))
-        self.add_video("v2", ("shared word",), ("src2",))
-        self.assertEqual(self.store.search_segments("shared")["total"], 2)
-        self.assertEqual(self.store.search_segments("shared", source_id="src1")["total"], 1)
+    def test_phrase_inside_one_cue_is_not_repeated_by_earlier_windows(self):
+        self.add_video(texts=("one", "two", "the exact phrase here", "four"))
+        self.assertEqual(self.hit_starts("exact phrase"), [2000])
+
+    def test_repeated_word_counts_every_cue(self):
+        self.add_video(texts=("hello there", "hello again", "and hello"))
+        self.assertEqual(self.hits("hello"), 3)
+
+    def test_phrase_mode_needs_words_in_order(self):
+        self.add_video(texts=("network neural",))
+        self.assertEqual(self.hits("neural network"), 0)
+        self.assertEqual(self.hits("neural network", mode="all"), 1)
+
+    def test_whole_words_by_default(self):
+        self.add_video(texts=("the catalog",))
+        self.assertEqual(self.hits("cat"), 0)
+        self.assertEqual(self.hits("cat", whole_words=False), 1)
+
+    def test_all_mode_matches_words_within_nearby_cues(self):
+        self.add_video(texts=("neural nets", "gradient descent", "x", "y", "far away"))
+        self.assertEqual(self.hits("neural gradient", mode="all"), 1)
+        self.assertEqual(self.hits("neural away", mode="all"), 0)
+
+    def test_results_are_grouped_per_video(self):
+        self.add_video("v1", ("word", "word"))
+        self.add_video("v2", ("word",))
+        result = self.store.search("word", sort="hits")
+        self.assertEqual((result["total_videos"], result["total_hits"]), (2, 3))
+        self.assertEqual([v["id"] for v in result["videos"]], ["v1", "v2"])
+        self.assertEqual(result["videos"][0]["hit_count"], 2)
+
+    def test_hits_carry_the_cue_before_them(self):
+        self.add_video(texts=("lead in", "the target"))
+        hit = self.store.search("target")["videos"][0]["hits"][0]
+        self.assertEqual(hit["before"], "lead in")
+
+    def test_paging_by_video(self):
+        for i in range(3):
+            self.add_video(f"v{i}", ("word",), upload_date=f"2026010{i + 1}")
+        first = self.store.search("word", sort="newest", limit=2)
+        second = self.store.search("word", sort="newest", limit=2, offset=2)
+        self.assertEqual([v["id"] for v in first["videos"]], ["v2", "v1"])
+        self.assertTrue(first["has_more"])
+        self.assertEqual([v["id"] for v in second["videos"]], ["v0"])
+        self.assertFalse(second["has_more"])
+
+    def test_filters(self):
+        self.add_video("v1", ("word",), ("src1",), upload_date="20240101", subtitle_type="auto")
+        self.add_video("v2", ("word",), ("src2",), upload_date="20250101")
+        self.assertEqual(self.hits("word", source_id="src1"), 1)
+        self.assertEqual(self.hits("word", subtitle_type="manual"), 1)
+        self.assertEqual(self.hits("word", date_from="20241231"), 1)
+        self.assertEqual(self.hits("word", date_to="20241231"), 1)
 
     def test_refetch_replaces_segments_and_reindexes(self):
-        self.add_video(texts=("original text",))
-        self.add_video(texts=("replacement text",))
-        self.assertEqual(self.store.search_segments("original")["total"], 0)
-        self.assertEqual(self.store.search_segments("replacement")["total"], 1)
+        self.add_video(texts=("original text", "more words"))
+        self.add_video(texts=("replacement text", "other words"))
+        self.assertEqual(self.hits("original"), 0)
+        self.assertEqual(self.hits("text more"), 0)
+        self.assertEqual(self.hits("replacement text other"), 1)
 
     def test_delete_video_clears_the_index(self):
-        self.add_video(texts=("findable",))
+        self.add_video(texts=("findable", "phrase"))
         self.store.delete_video("v1")
-        self.assertEqual(self.store.search_segments("findable")["total"], 0)
+        self.assertEqual(self.hits("findable phrase"), 0)
+        self.add_video("v2", ("other",))
+        self.assertEqual(self.hits("other"), 1)
+
+    def test_delete_source_clears_windows_of_dropped_videos(self):
+        self.add_video("v1", ("gone soon", "really"), ("src1",))
+        self.store.delete_source("src1", delete_videos=True)
+        self.assertEqual(self.hits("soon really"), 0)
 
     def test_existing_ids_exclude_videos_without_captions(self):
         """Uploaders add captions later, so those videos stay worth retrying."""
@@ -333,8 +406,8 @@ class StoreTests(unittest.TestCase):
         """Re-syncing must not rewrite caption rows just to add a link."""
         self.add_video("v1", ("keep me indexed",), ("src1",))
         self.store.link_videos_to_source(["v1"], "src2")
-        self.assertEqual(self.store.search_segments("indexed", source_id="src2")["total"], 1)
-        self.assertEqual(self.store.search_segments("indexed", source_id="src1")["total"], 1)
+        self.assertEqual(self.hits("indexed", source_id="src2"), 1)
+        self.assertEqual(self.hits("indexed", source_id="src1"), 1)
         self.assertEqual(len(self.store.get_transcript("v1")), 1)
 
     def test_link_videos_to_source_is_idempotent(self):
@@ -402,7 +475,7 @@ class MigrationTests(unittest.TestCase):
     def test_upgrades_an_unversioned_database(self):
         """Databases from before schema versioning report user_version 0."""
         store = CaptionStore(self.build_legacy_db(0))
-        self.assertEqual(store.search_segments("legacy")["total"], 1)
+        self.assertEqual(store.search("legacy")["total_hits"], 1)
         self.assertEqual(store.get_video("old1")["segment_count"], 1)
 
     def test_upgrades_a_pre_fts_database(self):
@@ -411,7 +484,7 @@ class MigrationTests(unittest.TestCase):
         store = CaptionStore(db_path)
 
         # Old rows survive and become searchable through the new index.
-        self.assertEqual(store.search_segments("legacy")["total"], 1)
+        self.assertEqual(store.search("legacy")["total_hits"], 1)
         self.assertEqual(store.get_setting("cookies_path"), "C:/cookies.txt")
         video = store.get_video("old1")
         self.assertEqual(video["segment_count"], 1)
@@ -434,7 +507,7 @@ class MigrationTests(unittest.TestCase):
             [{"start_ms": 0, "end_ms": 10, "text": "brand new caption"}],
             ["src1"],
         )
-        self.assertEqual(store.search_segments("brand")["total"], 1)
+        self.assertEqual(store.search("brand")["total_hits"], 1)
 
 
 class IngestOptionsTests(unittest.TestCase):
@@ -489,6 +562,43 @@ class UiBundleTests(unittest.TestCase):
     def test_no_ui_and_failed_build_resolves_to_none(self):
         with mock.patch("ui_bundle._build", return_value=False):
             self.assertIsNone(resolve_ui(self.root))
+
+
+class ApiSearchTests(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.api = Api(Path(temp.name))
+
+    def test_recent_searches_dedupe_and_cap(self):
+        for query in ["a", "b", "a", *map(str, range(20))]:
+            self.api.add_recent_search(query)
+        recent = self.api.get_recent_searches()["searches"]
+        self.assertEqual(len(recent), RECENT_SEARCH_LIMIT)
+        self.assertEqual(recent[0], "19")
+        self.assertEqual(len(set(recent)), len(recent))
+
+    def test_search_ignores_unknown_options(self):
+        response = self.api.search_transcripts("x", {"bogus": 1, "sort": "hits"})
+        self.assertTrue(response["ok"])
+
+    def test_exports(self):
+        result = {
+            "total_hits": 1,
+            "total_videos": 1,
+            "videos": [
+                {
+                    "id": "abc",
+                    "title": "Title",
+                    "channel": "Chan",
+                    "upload_date": "20260101",
+                    "hits": [{"start_ms": 61000, "highlight": "say \x02hi\x03 there"}],
+                }
+            ],
+        }
+        csv_text = _export_csv(result)
+        self.assertIn("1:01,https://www.youtube.com/watch?v=abc&t=61s,say hi there", csv_text)
+        self.assertIn("say **hi** there", _export_markdown("hi", result))
 
 
 if __name__ == "__main__":

@@ -1,104 +1,170 @@
 <script>
   import CookiesPanel from './components/CookiesPanel.svelte';
   import IngestPanel from './components/IngestPanel.svelte';
-  import JobProgress from './components/JobProgress.svelte';
-  import SearchPanel from './components/SearchPanel.svelte';
+  import JobChip from './components/JobChip.svelte';
+  import Modal from './components/Modal.svelte';
+  import SearchBox from './components/SearchBox.svelte';
+  import SearchFilters from './components/SearchFilters.svelte';
+  import SearchResults from './components/SearchResults.svelte';
   import SourcesPanel from './components/SourcesPanel.svelte';
-  import TranscriptPanel from './components/TranscriptPanel.svelte';
   import VideoListPanel from './components/VideoListPanel.svelte';
   import { apiClient, onBackendEvent } from './services/api.js';
   import { t } from './i18n/index.js';
-  import { FileText, Sun, Moon, X, Settings } from 'lucide-svelte';
+  import { Sun, Moon, Settings, Plus, ArrowUp, X } from 'lucide-svelte';
 
-  let status = $state('');
-  let statusError = $state(false);
+  const PAGE_SIZE = 25;
+  const EMPTY_RESULT = { videos: [], total_videos: 0, total_hits: 0, has_more: false };
+
   let settings = $state({});
+  let ytdlpVersion = $state('');
   let sources = $state([]);
   let videos = $state([]);
-  let missing = $state([]);
   let stats = $state({});
-  let activeSourceId = $state('');
+  let loaded = $state(false);
 
-  let transcript = $state([]);
-  let selectedVideo = $state(null);
-  let selectedVideoId = $state('');
-  let transcriptOpen = $state(false);
-
-  let searchResults = $state([]);
-  let searchTotal = $state(0);
-  let searchTruncated = $state(false);
+  let query = $state('');
+  let options = $state({
+    mode: 'phrase',
+    whole_words: true,
+    source_id: '',
+    subtitle_type: '',
+    date_from: '',
+    date_to: '',
+    sort: 'relevance',
+  });
+  let result = $state(EMPTY_RESULT);
   let searching = $state(false);
-  let lastQuery = $state('');
+  let loadingMore = $state(false);
+  let recent = $state([]);
+  let searchInput = $state();
+  let searchSeq = 0;
+  let searchTimer;
 
   let job = $state(null);
-  let ytdlpStatus = $state('');
+  let toast = $state(null);
+  let toastTimer;
   let darkMode = $state(true);
+  let addOpen = $state(false);
   let settingsOpen = $state(false);
   let confirmModal = $state(null);
 
+  let scroller = $state();
+  let showTop = $state(false);
+
   const busy = $derived(job?.status === 'running');
-  const activeSource = $derived(sources.find((source) => source.id === activeSourceId));
+  const searchActive = $derived(query.trim() !== '');
+  const activeSource = $derived(sources.find((source) => source.id === options.source_id));
   const scopeLabel = $derived(activeSource ? activeSource.title || activeSource.id : t('app.everything'));
   const hasContent = $derived((stats.segments || 0) > 0);
+  const libraryEmpty = $derived(loaded && !videos.length && !sources.length && !options.source_id);
 
   $effect(() => {
     document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
   });
 
-  function setStatus(message, isError = false) {
-    status = message;
-    statusError = isError;
+  // Typing and filter changes both re-run the search after a short pause.
+  $effect(() => {
+    const text = query;
+    const opts = { ...options };
+    clearTimeout(searchTimer);
+    if (!text.trim()) {
+      searchSeq++;
+      result = EMPTY_RESULT;
+      searching = false;
+      return;
+    }
+    searchTimer = setTimeout(() => runSearch(text, opts), 200);
+  });
+
+  function notify(message, isError = false) {
+    clearTimeout(toastTimer);
+    toast = { message, isError };
+    if (!isError) toastTimer = setTimeout(() => (toast = null), 4000);
   }
 
   // ---------------------------------------------------------------- data load
 
   async function refreshLists() {
-    const [videoResponse, sourceResponse, missingResponse, statsResponse] = await Promise.all([
-      apiClient.getVideos(activeSourceId),
+    const [videoResponse, sourceResponse, statsResponse] = await Promise.all([
+      apiClient.getVideos(options.source_id),
       apiClient.getSources(),
-      apiClient.getMissing(),
       apiClient.getStats(),
     ]);
     if (videoResponse.ok) videos = videoResponse.videos;
     if (sourceResponse.ok) sources = sourceResponse.sources;
-    if (missingResponse.ok) missing = missingResponse.videos;
     if (statsResponse.ok) stats = statsResponse.stats;
+    loaded = true;
   }
 
-  async function selectSource(sourceId) {
-    activeSourceId = sourceId;
-    await refreshLists();
-    if (lastQuery) await runSearch(lastQuery);
+  function selectSource(sourceId) {
+    options.source_id = sourceId;
+    refreshLists();
+  }
+
+  function setOptions(next) {
+    const sourceChanged = next.source_id !== options.source_id;
+    options = next;
+    if (sourceChanged) refreshLists();
+  }
+
+  // ------------------------------------------------------------------ search
+
+  async function runSearch(text, opts, offset = 0) {
+    const seq = ++searchSeq;
+    if (offset) loadingMore = true;
+    else searching = true;
+    const response = await apiClient.searchTranscripts(text, { ...opts, limit: PAGE_SIZE, offset });
+    if (seq !== searchSeq) return;
+    searching = false;
+    loadingMore = false;
+    if (!response.ok) {
+      notify(response.error, true);
+      return;
+    }
+    const { ok, ...page } = response;
+    result = offset ? { ...page, videos: [...result.videos, ...page.videos] } : page;
+  }
+
+  function rerunSearch() {
+    if (searchActive) runSearch(query, { ...options });
+  }
+
+  function loadMore() {
+    runSearch(query, { ...options }, result.videos.length);
+  }
+
+  async function rememberSearch(text = query) {
+    if (!text.trim()) return;
+    const response = await apiClient.addRecentSearch(text);
+    if (response.ok) recent = response.searches;
+  }
+
+  async function clearRecent() {
+    const response = await apiClient.clearRecentSearches();
+    if (response.ok) recent = response.searches;
+  }
+
+  async function exportResults(format) {
+    rememberSearch();
+    const response = await apiClient.exportSearch(query, { ...options }, format);
+    if (!response.ok) notify(response.error, true);
+    else if (response.path) notify(t('results.exported', response.path));
   }
 
   // ------------------------------------------------------------------ ingest
 
+  async function startJob(request) {
+    const response = await request;
+    if (!response.ok) {
+      notify(response.error, true);
+      return false;
+    }
+    job = response.job;
+    return true;
+  }
+
   async function handleFetch(input) {
-    const response = await apiClient.startIngest(input);
-    if (!response.ok) {
-      setStatus(response.error, true);
-      return;
-    }
-    job = response.job;
-    setStatus('');
-  }
-
-  async function handleSync(sourceId, force) {
-    const response = await apiClient.syncSource(sourceId, force);
-    if (!response.ok) {
-      setStatus(response.error, true);
-      return;
-    }
-    job = response.job;
-  }
-
-  async function handleRefetch(videoId) {
-    const response = await apiClient.refetchVideos([videoId]);
-    if (!response.ok) {
-      setStatus(response.error, true);
-      return;
-    }
-    job = response.job;
+    if (await startJob(apiClient.startIngest(input))) addOpen = false;
   }
 
   function confirmRefetchAll() {
@@ -107,61 +173,8 @@
       body: t('app.confirmRefetchAllBody'),
       confirmLabel: t('app.confirmRefetchAllLabel'),
       danger: false,
-      action: async () => {
-        const response = await apiClient.refetchAll('all');
-        if (!response.ok) setStatus(response.error, true);
-        else job = response.job;
-      },
+      action: () => startJob(apiClient.refetchAll('all')),
     };
-  }
-
-  async function retryMissing() {
-    const response = await apiClient.refetchAll('missing');
-    if (!response.ok) {
-      setStatus(response.error, true);
-      return;
-    }
-    job = response.job;
-  }
-
-  async function cancelJob() {
-    await apiClient.cancelJob(job?.id || '');
-  }
-
-  // ------------------------------------------------------------------ search
-
-  async function runSearch(query) {
-    lastQuery = query;
-    if (!query.trim()) {
-      searchResults = [];
-      searchTotal = 0;
-      searchTruncated = false;
-      return;
-    }
-    searching = true;
-    const response = await apiClient.searchTranscripts(query, { sourceId: activeSourceId });
-    searching = false;
-    if (!response.ok) {
-      setStatus(response.error, true);
-      return;
-    }
-    searchResults = response.results;
-    searchTotal = response.total;
-    searchTruncated = response.truncated;
-  }
-
-  // -------------------------------------------------------------- transcript
-
-  async function loadTranscript(videoId) {
-    const response = await apiClient.getTranscript(videoId);
-    if (!response.ok) {
-      setStatus(response.error, true);
-      return;
-    }
-    transcript = response.segments;
-    selectedVideo = response.video;
-    selectedVideoId = videoId;
-    transcriptOpen = true;
   }
 
   // ------------------------------------------------------------------ delete
@@ -169,16 +182,11 @@
   async function deleteVideo(videoId) {
     const response = await apiClient.deleteVideo(videoId);
     if (!response.ok) {
-      setStatus(response.error, true);
+      notify(response.error, true);
       return;
     }
-    if (selectedVideoId === videoId) {
-      transcript = [];
-      selectedVideoId = '';
-      selectedVideo = null;
-    }
     await refreshLists();
-    if (lastQuery) await runSearch(lastQuery);
+    rerunSearch();
   }
 
   function confirmDeleteAll() {
@@ -189,45 +197,36 @@
       danger: true,
       action: async () => {
         await apiClient.deleteAllVideos();
-        transcript = [];
-        selectedVideoId = '';
-        selectedVideo = null;
-        searchResults = [];
-        searchTotal = 0;
-        activeSourceId = '';
-        transcriptOpen = false;
+        query = '';
+        options.source_id = '';
         await refreshLists();
-        setStatus(t('app.libraryCleared'));
+        notify(t('app.libraryCleared'));
       },
     };
   }
 
   function confirmDeleteSource(source) {
+    const remove = async (withVideos) => {
+      await apiClient.deleteSource(source.id, withVideos);
+      if (options.source_id === source.id) options.source_id = '';
+      await refreshLists();
+      rerunSearch();
+    };
     confirmModal = {
       title: t('app.confirmRemoveSourceTitle', source.title || source.id),
       body: t('app.confirmRemoveSourceBody', source.video_count),
       confirmLabel: t('app.confirmRemoveSourceOnly'),
       extraLabel: t('app.confirmRemoveSourceAndVideos'),
       danger: true,
-      action: async () => {
-        await apiClient.deleteSource(source.id, false);
-        if (activeSourceId === source.id) activeSourceId = '';
-        await refreshLists();
-      },
-      extraAction: async () => {
-        await apiClient.deleteSource(source.id, true);
-        if (activeSourceId === source.id) activeSourceId = '';
-        await refreshLists();
-        if (lastQuery) await runSearch(lastQuery);
-      },
+      action: () => remove(false),
+      extraAction: () => remove(true),
     };
   }
 
   async function runConfirm(which) {
     const modal = confirmModal;
     confirmModal = null;
-    if (!modal) return;
-    await (which === 'extra' ? modal.extraAction?.() : modal.action?.());
+    await (which === 'extra' ? modal?.extraAction?.() : modal?.action?.());
   }
 
   // ---------------------------------------------------------------- settings
@@ -239,187 +238,201 @@
 
   async function browseCookies() {
     const response = await apiClient.selectCookiesFile();
-    if (!response.ok) {
-      setStatus(response.error, true);
-      return;
-    }
-    if (response.path) await updateSettings({ cookies_path: response.path });
+    if (!response.ok) notify(response.error, true);
+    else if (response.path) await updateSettings({ cookies_path: response.path });
   }
 
   // -------------------------------------------------------------- lifecycle
 
+  function handleGlobalKeydown(event) {
+    if (event.key !== '/' || event.ctrlKey || event.metaKey || event.altKey) return;
+    const target = event.target;
+    if (target.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+    event.preventDefault();
+    searchInput?.focus();
+  }
+
   onBackendEvent((event) => {
     if (event.type === 'job') {
       job = event.job;
-      if (event.job.status !== 'running') {
-        refreshLists().then(() => lastQuery && runSearch(lastQuery));
-      }
+      if (event.job.status !== 'running') refreshLists().then(rerunSearch);
     } else if (event.type === 'ytdlp') {
-      ytdlpStatus = event.message || '';
-      if (event.error) setStatus(event.message, true);
+      if (event.version) ytdlpVersion = event.version;
+      if (event.message) notify(event.message, !!event.error);
     }
   });
 
   async function init() {
-    const response = await apiClient.getSettings();
-    if (response.ok) settings = response.settings;
-    await refreshLists();
-    // A job can outlive a page reload; pick it back up.
-    const jobResponse = await apiClient.getJob();
+    const [settingsResponse, recentResponse, jobResponse] = await Promise.all([
+      apiClient.getSettings(),
+      apiClient.getRecentSearches(),
+      // A job can outlive a page reload; pick it back up.
+      apiClient.getJob(),
+    ]);
+    if (settingsResponse.ok) {
+      settings = settingsResponse.settings;
+      ytdlpVersion = settingsResponse.ytdlp_version;
+    }
+    if (recentResponse.ok) recent = recentResponse.searches;
     if (jobResponse.ok && jobResponse.job) job = jobResponse.job;
+    await refreshLists();
   }
 
   apiClient.onReady(init);
 </script>
 
+<svelte:window onkeydown={handleGlobalKeydown} />
+
 <div class="app">
-  <aside class="sidebar left">
-    <div class="sidebar-header">
-      <span class="sidebar-title">{t('app.sidebarTitle')}</span>
-      <button
-        class="icon-btn-sm"
-        title={t('app.settingsTooltip')}
-        aria-label={t('app.settingsTooltip')}
-        onclick={() => (settingsOpen = !settingsOpen)}
-      >
-        <Settings size={15} />
-      </button>
+  <header>
+    <div class="bar">
+      <span class="brand">{t('app.title')}</span>
+      <div class="search">
+        <SearchBox
+          bind:value={query}
+          bind:input={searchInput}
+          {recent}
+          placeholder={hasContent ? t('search.placeholder', scopeLabel) : t('search.fetchFirst')}
+          onsubmit={(text) => rememberSearch(text)}
+          onclearRecent={clearRecent}
+        />
+      </div>
+      <div class="tools">
+        {#if job}
+          <JobChip {job} oncancel={() => apiClient.cancelJob(job?.id || '')} ondismiss={() => (job = null)} />
+        {/if}
+        <button class="tool" type="button" title={t('app.addTooltip')} onclick={() => (addOpen = true)}>
+          <Plus size={16} />
+          <span>{t('app.add')}</span>
+        </button>
+        <button
+          class="icon-btn"
+          type="button"
+          title={t('app.settingsTooltip')}
+          aria-label={t('app.settingsTooltip')}
+          onclick={() => (settingsOpen = true)}
+        >
+          <Settings size={16} />
+        </button>
+        <button
+          class="icon-btn"
+          type="button"
+          title={darkMode ? t('app.lightMode') : t('app.darkMode')}
+          aria-label={t('app.toggleTheme')}
+          onclick={() => (darkMode = !darkMode)}
+        >
+          {#if darkMode}<Sun size={16} />{:else}<Moon size={16} />{/if}
+        </button>
+      </div>
     </div>
+    {#if searchActive}
+      <div class="filters-row">
+        <SearchFilters {options} {sources} onchange={setOptions} />
+      </div>
+    {/if}
+    <div class="progress" class:on={searching}></div>
+  </header>
 
-    <div class="sidebar-content">
-      <IngestPanel
-        {settings}
-        {busy}
-        onfetch={handleFetch}
-        onsettingchange={updateSettings}
-      />
-
-      {#if settingsOpen}
-        <div class="settings-block">
-          <CookiesPanel
-            cookiesPath={settings.cookies_path || ''}
-            cookiesBrowser={settings.cookies_browser || ''}
-            onchange={updateSettings}
-            onbrowse={browseCookies}
+  <main bind:this={scroller} onscroll={() => (showTop = scroller.scrollTop > 500)}>
+    <div class="column">
+      {#if searchActive}
+        <div class:stale={searching}>
+          <SearchResults
+            {result}
+            {query}
+            sort={options.sort}
+            onsort={(sort) => (options.sort = sort)}
+            loading={searching}
+            {loadingMore}
+            onloadMore={loadMore}
+            onexport={exportResults}
+            onengage={() => rememberSearch()}
           />
         </div>
-      {/if}
-
-      {#if job}
-        <JobProgress {job} oncancel={cancelJob} />
-      {/if}
-
-      <SourcesPanel
-        {sources}
-        {activeSourceId}
-        {busy}
-        onselect={selectSource}
-        onsync={handleSync}
-        ondelete={confirmDeleteSource}
-      />
-
-      <VideoListPanel
-        {videos}
-        {missing}
-        {selectedVideoId}
-        {busy}
-        onselect={loadTranscript}
-        ondelete={deleteVideo}
-        onrefetch={handleRefetch}
-        ondeleteAll={confirmDeleteAll}
-        onrefetchAll={confirmRefetchAll}
-        onretryMissing={retryMissing}
-      />
-    </div>
-
-    {#if status || ytdlpStatus}
-      <div class="sidebar-footer" class:error={statusError}>{status || ytdlpStatus}</div>
-    {/if}
-  </aside>
-
-  <main class="main">
-    <div class="top-bar">
-      <button
-        class="icon-btn"
-        class:active={transcriptOpen}
-        title={t('app.transcriptTooltip')}
-        aria-label={t('app.toggleTranscript')}
-        onclick={() => (transcriptOpen = !transcriptOpen)}
-      >
-        <FileText size={18} />
-      </button>
-      <button
-        class="icon-btn"
-        title={darkMode ? t('app.lightMode') : t('app.darkMode')}
-        aria-label={t('app.toggleTheme')}
-        onclick={() => (darkMode = !darkMode)}
-      >
-        {#if darkMode}<Sun size={18} />{:else}<Moon size={18} />{/if}
-      </button>
-    </div>
-
-    <section class="hero">
-      <div class="hero-head">
-        <h1>{t('app.title')}</h1>
+      {:else if libraryEmpty}
+        <div class="empty-state">
+          <h1>{t('app.emptyTitle')}</h1>
+          <p>{t('app.emptyBody')}</p>
+          <button class="primary" type="button" onclick={() => (addOpen = true)}>{t('app.emptyAction')}</button>
+        </div>
+      {:else if loaded}
         {#if hasContent}
-          <p class="subtitle">
+          <p class="stats">
             {t('app.stats', { videos: stats.videos, segments: stats.segments, missing: stats.missing })}
           </p>
         {/if}
-      </div>
-      <SearchPanel
-        results={searchResults}
-        total={searchTotal}
-        truncated={searchTruncated}
-        {searching}
-        {scopeLabel}
-        {hasContent}
-        query={lastQuery}
-        onsearch={runSearch}
-        onopenVideo={loadTranscript}
-      />
-    </section>
+        <SourcesPanel
+          {sources}
+          activeSourceId={options.source_id}
+          {busy}
+          onselect={selectSource}
+          onsync={(sourceId, force) => startJob(apiClient.syncSource(sourceId, force))}
+          ondelete={confirmDeleteSource}
+        />
+        <VideoListPanel
+          {videos}
+          missingCount={stats.missing || 0}
+          {busy}
+          ondelete={deleteVideo}
+          onrefetch={(videoId) => startJob(apiClient.refetchVideos([videoId]))}
+          ondeleteAll={confirmDeleteAll}
+          onrefetchAll={confirmRefetchAll}
+          onretryMissing={() => startJob(apiClient.refetchAll('missing'))}
+        />
+      {/if}
+    </div>
   </main>
 
-  <aside class="sidebar right" class:open={transcriptOpen}>
-    <div class="sidebar-header">
-      <span class="sidebar-title" title={selectedVideo?.title || ''}>
-        {selectedVideo?.title || t('app.transcriptFallbackTitle')}
-      </span>
-      <button class="icon-btn-sm" aria-label={t('app.closeTranscript')} onclick={() => (transcriptOpen = false)}>
-        <X size={16} />
-      </button>
+  {#if showTop}
+    <button
+      class="to-top"
+      type="button"
+      title={t('app.backToTop')}
+      aria-label={t('app.backToTop')}
+      onclick={() => scroller.scrollTo({ top: 0, behavior: 'smooth' })}
+    >
+      <ArrowUp size={18} />
+    </button>
+  {/if}
+
+  {#if toast}
+    <div class="toast" class:error={toast.isError} role="status">
+      <span>{toast.message}</span>
+      <button type="button" aria-label={t('app.dismiss')} onclick={() => (toast = null)}><X size={14} /></button>
     </div>
-    <div class="sidebar-content">
-      <TranscriptPanel {transcript} video={selectedVideo} videoId={selectedVideoId} />
-    </div>
-  </aside>
+  {/if}
+
+  {#if addOpen}
+    <Modal title={t('app.addTitle')} width={560} onclose={() => (addOpen = false)}>
+      <IngestPanel {settings} {busy} onfetch={handleFetch} onsettingchange={updateSettings} />
+    </Modal>
+  {/if}
+
+  {#if settingsOpen}
+    <Modal title={t('app.settingsTitle')} onclose={() => (settingsOpen = false)}>
+      <CookiesPanel
+        cookiesPath={settings.cookies_path || ''}
+        cookiesBrowser={settings.cookies_browser || ''}
+        onchange={updateSettings}
+        onbrowse={browseCookies}
+      />
+      {#if ytdlpVersion}<p class="version">{t('app.ytdlpVersion', ytdlpVersion)}</p>{/if}
+    </Modal>
+  {/if}
 
   {#if confirmModal}
-    <div
-      class="modal-overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="modal-title"
-      tabindex="-1"
-      onclick={() => (confirmModal = null)}
-      onkeydown={(event) => event.key === 'Escape' && (confirmModal = null)}
-    >
-      <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <div class="modal" onclick={(event) => event.stopPropagation()} onkeydown={(event) => event.stopPropagation()}>
-        <h3 id="modal-title">{confirmModal.title}</h3>
-        <p>{confirmModal.body}</p>
-        <div class="modal-actions">
-          <button class="secondary" onclick={() => (confirmModal = null)}>{t('common.cancel')}</button>
-          {#if confirmModal.extraLabel}
-            <button class="danger" onclick={() => runConfirm('extra')}>{confirmModal.extraLabel}</button>
-          {/if}
-          <button class={confirmModal.danger ? 'danger' : 'primary'} onclick={() => runConfirm('main')}>
-            {confirmModal.confirmLabel}
-          </button>
-        </div>
+    <Modal title={confirmModal.title} onclose={() => (confirmModal = null)}>
+      <p class="confirm-body">{confirmModal.body}</p>
+      <div class="modal-actions">
+        <button class="secondary" type="button" onclick={() => (confirmModal = null)}>{t('common.cancel')}</button>
+        {#if confirmModal.extraLabel}
+          <button class="danger" type="button" onclick={() => runConfirm('extra')}>{confirmModal.extraLabel}</button>
+        {/if}
+        <button class={confirmModal.danger ? 'danger' : 'primary'} type="button" onclick={() => runConfirm('main')}>
+          {confirmModal.confirmLabel}
+        </button>
       </div>
-    </div>
+    </Modal>
   {/if}
 </div>
 
@@ -429,7 +442,6 @@
     --bg-elevated: #12151a;
     --bg-panel: #12151a;
     --bg-input: #12151a;
-    --bg-sidebar: #0d0f13;
     --border: #1f242d;
     --border-input: #252a35;
     --text: #f2f2f2;
@@ -446,7 +458,8 @@
     --mark-text: #ffffff;
     --scrollbar-thumb: #3a3f4a;
     --scrollbar-thumb-hover: #4a5060;
-    --sidebar-width: 360px;
+    --column: 920px;
+    color-scheme: dark;
   }
 
   :global([data-theme="light"]) {
@@ -454,7 +467,6 @@
     --bg-elevated: #ffffff;
     --bg-panel: #ffffff;
     --bg-input: #f0f0f2;
-    --bg-sidebar: #ffffff;
     --border: #e3e5e9;
     --border-input: #c5c9d0;
     --text: #1f2937;
@@ -471,6 +483,7 @@
     --mark-text: #1f2937;
     --scrollbar-thumb: #c5c9d0;
     --scrollbar-thumb-hover: #9ca3af;
+    color-scheme: light;
   }
 
   :global(body) {
@@ -502,241 +515,230 @@
     background: var(--scrollbar-thumb-hover);
   }
 
-  .app {
-    height: 100vh;
-    display: flex;
-    overflow: hidden;
-  }
-
-  .sidebar {
-    width: var(--sidebar-width);
-    background: var(--bg-sidebar);
-    border-right: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    flex-shrink: 0;
-  }
-
-  .sidebar.right {
-    position: fixed;
-    top: 0;
-    bottom: 0;
-    right: 0;
-    border-right: none;
-    border-left: 1px solid var(--border);
-    transform: translateX(100%);
-    transition: transform 0.2s ease;
-    z-index: 20;
-  }
-
-  .sidebar.right.open {
-    transform: translateX(0);
-  }
-
-  .sidebar-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-  }
-
-  .sidebar-title {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .sidebar-content {
-    flex: 1;
-    overflow-y: auto;
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    min-height: 0;
-  }
-
-  .sidebar-footer {
-    padding: 10px 16px;
-    font-size: 12px;
-    color: var(--text-secondary);
-    border-top: 1px solid var(--border);
-    flex-shrink: 0;
-  }
-
-  .sidebar-footer.error {
-    color: var(--error);
-  }
-
-  .settings-block {
-    padding: 12px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-  }
-
-  .main {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    position: relative;
-  }
-
-  .top-bar {
-    position: absolute;
-    top: 12px;
-    right: 16px;
-    display: flex;
-    gap: 8px;
-    z-index: 10;
-  }
-
-  .icon-btn {
-    background: var(--bg-elevated);
-    border: 1px solid var(--border);
-    color: var(--text-muted);
-    padding: 8px;
-    border-radius: 8px;
-    cursor: pointer;
-    display: flex;
-  }
-
-  .icon-btn:hover {
-    color: var(--text);
-    border-color: var(--border-input);
-  }
-
-  .icon-btn.active {
-    color: var(--accent);
-    border-color: var(--accent);
-  }
-
-  .icon-btn-sm {
-    background: transparent;
-    border: none;
-    color: var(--text-muted);
-    padding: 4px;
-    border-radius: 4px;
-    cursor: pointer;
-    display: flex;
-    flex-shrink: 0;
-  }
-
-  .icon-btn-sm:hover {
-    color: var(--text);
-    background: var(--border);
-  }
-
-  .hero {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 72px 24px 28px;
-    overflow: hidden;
-  }
-
-  .hero-head {
-    text-align: center;
-    flex-shrink: 0;
-    margin-bottom: 22px;
-  }
-
-  .hero h1 {
-    font-size: 28px;
-    font-weight: 600;
-    margin: 0;
-    letter-spacing: -0.5px;
-  }
-
-  .subtitle {
-    margin: 6px 0 0;
-    font-size: 12px;
-    color: var(--text-muted);
-  }
-
-  .hero :global(.search-panel) {
-    width: 100%;
-    max-width: 720px;
-    flex: 1;
-    min-height: 0;
-  }
-
-  .primary {
+  :global(.primary) {
     background: var(--accent);
     border: none;
     color: white;
-    padding: 10px 16px;
+    padding: 9px 16px;
     border-radius: 8px;
     cursor: pointer;
     font-weight: 500;
     font-size: 13px;
   }
 
-  .primary:hover {
+  :global(.primary:hover:not(:disabled)) {
     background: var(--accent-hover);
   }
 
-  .secondary {
-    background: var(--bg-input);
-    border: 1px solid var(--border-input);
-    color: var(--text);
-    padding: 10px 16px;
-    border-radius: 8px;
-    cursor: pointer;
-    font-size: 13px;
+  :global(.primary:disabled) {
+    opacity: 0.5;
+    cursor: default;
   }
 
-  .secondary:hover {
-    background: var(--border);
+  .app {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
   }
 
-  .danger {
-    background: #dc2626;
-    border: none;
-    color: white;
-    padding: 10px 16px;
-    border-radius: 8px;
-    cursor: pointer;
-    font-weight: 500;
-    font-size: 13px;
+  header {
+    position: relative;
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-base);
   }
 
-  .danger:hover {
-    background: #b91c1c;
-  }
-
-  .modal-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.6);
+  .bar,
+  .filters-row {
     display: flex;
     align-items: center;
-    justify-content: center;
-    z-index: 100;
+    gap: 16px;
+    padding: 12px 24px;
   }
 
-  .modal {
+  .filters-row {
+    padding-top: 0;
+    max-width: calc(var(--column) + 48px);
+    margin: 0 auto;
+  }
+
+  .brand {
+    font-size: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+    flex: 1;
+    flex-basis: 0;
+  }
+
+  .search {
+    flex: 0 1 var(--column);
+    min-width: 0;
+  }
+
+  .tools {
+    flex: 1;
+    flex-basis: 0;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .tool,
+  .icon-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-input);
+    color: var(--text-secondary);
+    padding: 7px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+
+  .tool {
+    padding: 6px 12px 6px 9px;
+  }
+
+  .tool:hover,
+  .icon-btn:hover {
+    color: var(--text);
+  }
+
+  /* Thin bar under the header while a search is in flight. */
+  .progress {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -1px;
+    height: 2px;
+    overflow: hidden;
+  }
+
+  .progress.on::after {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 30%;
+    background: var(--accent);
+    animation: sweep 0.9s ease-in-out infinite;
+  }
+
+  @keyframes sweep {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(340%); }
+  }
+
+  main {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .column {
+    max-width: var(--column);
+    margin: 0 auto;
+    padding: 20px 24px 48px;
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+  }
+
+  .stale {
+    opacity: 0.6;
+    transition: opacity 0.15s;
+  }
+
+  .stats {
+    margin: 0;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .empty-state {
+    text-align: center;
+    margin-top: 14vh;
+  }
+
+  .empty-state h1 {
+    font-size: 20px;
+    font-weight: 600;
+    margin: 0 0 8px;
+  }
+
+  .empty-state p {
+    margin: 0 auto 20px;
+    max-width: 420px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+  }
+
+  .to-top {
+    position: fixed;
+    right: 24px;
+    bottom: 24px;
+    display: flex;
+    padding: 10px;
+    border-radius: 50%;
     background: var(--bg-elevated);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 24px;
-    max-width: 460px;
-    width: 90%;
+    border: 1px solid var(--border-input);
+    color: var(--text-secondary);
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+    z-index: 50;
   }
 
-  .modal h3 {
-    margin: 0 0 12px;
-    font-size: 16px;
+  .to-top:hover {
+    color: var(--text);
   }
 
-  .modal p {
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: 24px;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    max-width: min(640px, calc(100vw - 48px));
+    padding: 10px 12px 10px 16px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-input);
+    border-radius: 10px;
+    font-size: 13px;
+    color: var(--text);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+    z-index: 90;
+  }
+
+  .toast.error {
+    border-color: var(--error);
+    color: var(--error);
+  }
+
+  .toast span {
+    word-break: break-word;
+  }
+
+  .toast button {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    padding: 2px;
+  }
+
+  .version {
+    margin: 14px 0 0;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .confirm-body {
     margin: 0 0 20px;
     font-size: 14px;
     color: var(--text-secondary);
@@ -750,9 +752,42 @@
     flex-wrap: wrap;
   }
 
-  @media (max-width: 900px) {
-    :global(:root) {
-      --sidebar-width: 300px;
+  .secondary {
+    background: var(--bg-input);
+    border: 1px solid var(--border-input);
+    color: var(--text);
+    padding: 9px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+
+  .secondary:hover {
+    background: var(--border);
+  }
+
+  .danger {
+    background: #dc2626;
+    border: none;
+    color: white;
+    padding: 9px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 13px;
+  }
+
+  .danger:hover {
+    background: #b91c1c;
+  }
+
+  @media (max-width: 980px) {
+    .brand {
+      display: none;
+    }
+
+    .search {
+      flex: 1;
     }
   }
 </style>

@@ -14,49 +14,84 @@ import threading
 from pathlib import Path
 from typing import Iterable, Optional
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # Terms are quoted before being handed to FTS5, so the only characters that
 # still need stripping are the ones that break tokenisation entirely.
 _FTS_STRIP_RE = re.compile(r'["\x00]')
 _PHRASE_RE = re.compile(r'"([^"]*)"')
 
+SEARCH_MODES = ("phrase", "all")
+SEARCH_SORTS = {
+    "relevance": "best ASC, hit_count DESC",
+    "hits": "hit_count DESC, best ASC",
+    "newest": "v.upload_date DESC, best ASC",
+    "oldest": "v.upload_date = '', v.upload_date ASC, best ASC",
+}
+
+# A hit is reported at the cue its match starts in. Matching runs against
+# windows of three consecutive cues, so a sentence YouTube split across cues is
+# still found; the same match then also shows up in the window(s) before it.
+# A window keeps the hit if its first cue matches on its own, or if the window
+# one cue later does not match (so the match must begin in this first cue).
+_HITS_CTE = """
+WITH single AS MATERIALIZED (
+    SELECT rowid AS id FROM segments_fts WHERE segments_fts MATCH :q
+),
+windowed AS MATERIALIZED (
+    SELECT rowid AS id, bm25(windows_fts) AS score
+    FROM windows_fts WHERE windows_fts MATCH :q
+),
+hits AS (
+    SELECT w.id, w.score FROM windowed w
+    WHERE w.id IN (SELECT id FROM single)
+       OR w.id + 1 NOT IN (SELECT id FROM windowed)
+)
+"""
+
 
 class SearchSyntaxError(ValueError):
     """Raised when a query cannot be turned into a valid FTS5 expression."""
 
 
-def build_fts_query(query: str, prefix: bool = True) -> str:
+def _clean_tokens(text: str) -> list[str]:
+    tokens = [_FTS_STRIP_RE.sub("", token) for token in text.split()]
+    return [token for token in tokens if token]
+
+
+def build_fts_query(query: str, mode: str = "phrase", whole_words: bool = True) -> str:
     """Turn user input into an FTS5 MATCH expression.
 
-    Bare words are ANDed together and matched as prefixes, so typing
-    ``neur net`` finds "neural network". A double-quoted run stays an exact
-    phrase. Every term is quoted before it reaches FTS5, so operators the user
-    happens to type (``AND``, ``*``, ``-``, ``NEAR``) are searched for
-    literally -- this is a caption search box, not a query language.
+    ``phrase`` matches the words in order, as typed. ``all`` matches every word
+    anywhere in the same stretch of captions, keeping double-quoted runs as
+    phrases. With ``whole_words`` off, words also match as prefixes (only the
+    last word in phrase mode). Every term is quoted before it reaches FTS5, so
+    operators the user happens to type (``AND``, ``*``, ``-``, ``NEAR``) are
+    searched for literally -- this is a caption search box, not a query
+    language.
     """
     query = (query or "").strip()
     if not query:
         raise SearchSyntaxError("Empty query")
+    star = "" if whole_words else "*"
+
+    if mode == "phrase":
+        tokens = _clean_tokens(query)
+        if not tokens:
+            raise SearchSyntaxError("Query has no searchable terms")
+        return '"{}"{}'.format(" ".join(tokens), star)
 
     parts: list[str] = []
 
     def add_terms(text: str) -> None:
-        for token in text.split():
-            token = _FTS_STRIP_RE.sub("", token)
-            if token:
-                parts.append(f'"{token}"*' if prefix else f'"{token}"')
-
-    def add_phrase(text: str) -> None:
-        tokens = [_FTS_STRIP_RE.sub("", tok) for tok in text.split()]
-        tokens = [tok for tok in tokens if tok]
-        if tokens:
-            parts.append('"{}"'.format(" ".join(tokens)))
+        parts.extend(f'"{token}"{star}' for token in _clean_tokens(text))
 
     cursor = 0
     for match in _PHRASE_RE.finditer(query):
         add_terms(query[cursor : match.start()])
-        add_phrase(match.group(1))
+        tokens = _clean_tokens(match.group(1))
+        if tokens:
+            parts.append('"{}"'.format(" ".join(tokens)))
         cursor = match.end()
     add_terms(query[cursor:])
 
@@ -191,7 +226,47 @@ class CaptionStore:
                 VALUES ('delete', old.id, old.text);
                 INSERT INTO segments_fts(rowid, text) VALUES (new.id, new.text);
             END;
+
+            -- Each cue joined with the next two from the same video. A video's
+            -- cues are inserted in one go and in time order, so their ids are
+            -- consecutive and id + 1 is the next cue. Being a view, the window
+            -- text is never stored twice; only its index is.
+            CREATE VIEW IF NOT EXISTS segment_windows AS
+            SELECT s.id, s.video_id,
+                   s.text || COALESCE(' ' || n1.text, '') || COALESCE(' ' || n2.text, '') AS text
+            FROM transcript_segments s
+            LEFT JOIN transcript_segments n1 ON n1.id = s.id + 1 AND n1.video_id = s.video_id
+            LEFT JOIN transcript_segments n2 ON n2.id = s.id + 2 AND n2.video_id = s.video_id;
+
+            -- Kept in step by hand (_index_windows/_unindex_windows): a trigger
+            -- on one cue cannot see the neighbours its windows depend on.
+            CREATE VIRTUAL TABLE IF NOT EXISTS windows_fts USING fts5(
+                text,
+                content='segment_windows',
+                content_rowid='id',
+                tokenize='unicode61 remove_diacritics 2'
+            );
             """
+        )
+
+    def _index_windows(self, conn: sqlite3.Connection, video_id: str) -> None:
+        conn.execute(
+            "INSERT INTO windows_fts(rowid, text) SELECT id, text FROM segment_windows WHERE video_id = ?",
+            (video_id,),
+        )
+
+    def _unindex_windows(self, conn: sqlite3.Connection, video_filter: str, params: tuple) -> None:
+        """Drop windows from the index; must run while their cues still exist.
+
+        External-content FTS5 deletes need the exact text that was indexed,
+        which the view can only reproduce before the cues are gone.
+        """
+        conn.execute(
+            f"""
+            INSERT INTO windows_fts(windows_fts, rowid, text)
+            SELECT 'delete', id, text FROM segment_windows WHERE video_id {video_filter}
+            """,
+            params,
         )
 
     def _migrate(self, conn: sqlite3.Connection, from_version: int) -> None:
@@ -224,6 +299,7 @@ class CaptionStore:
         # matches. Rebuilding unconditionally is the only reliable option --
         # and this runs once per schema bump, not per launch.
         conn.execute("INSERT INTO segments_fts(segments_fts) VALUES ('rebuild')")
+        conn.execute("INSERT INTO windows_fts(windows_fts) VALUES ('rebuild')")
 
     # ------------------------------------------------------------------ videos
 
@@ -233,9 +309,10 @@ class CaptionStore:
         segments: Iterable[dict],
         source_ids: Iterable[str] = (),
     ) -> int:
+        # Time order matters: segment_windows treats id + 1 as the next cue.
         segment_rows = [
             (video["id"], seg["start_ms"], seg["end_ms"], seg["text"])
-            for seg in segments
+            for seg in sorted(segments, key=lambda seg: seg["start_ms"])
         ]
         with self._write_lock:
             conn = self._connect()
@@ -278,6 +355,7 @@ class CaptionStore:
                     )
                     # DELETE fires the FTS delete trigger, keeping the index in
                     # step when a video is refetched.
+                    self._unindex_windows(conn, "= ?", (video["id"],))
                     conn.execute(
                         "DELETE FROM transcript_segments WHERE video_id = ?",
                         (video["id"],),
@@ -289,6 +367,7 @@ class CaptionStore:
                         """,
                         segment_rows,
                     )
+                    self._index_windows(conn, video["id"])
                     for source_id in source_ids:
                         conn.execute(
                             """
@@ -376,7 +455,7 @@ class CaptionStore:
         try:
             rows = conn.execute(
                 """
-                SELECT start_ms, end_ms, text FROM transcript_segments
+                SELECT id, start_ms, end_ms, text FROM transcript_segments
                 WHERE video_id = ? ORDER BY start_ms
                 """,
                 (video_id,),
@@ -403,6 +482,7 @@ class CaptionStore:
             conn = self._connect()
             try:
                 with conn:
+                    self._unindex_windows(conn, "= ?", (video_id,))
                     conn.execute(
                         "DELETE FROM transcript_segments WHERE video_id = ?", (video_id,)
                     )
@@ -423,6 +503,7 @@ class CaptionStore:
                     conn.execute("DELETE FROM videos")
                     conn.execute("DELETE FROM sources")
                     conn.execute("INSERT INTO segments_fts(segments_fts) VALUES ('rebuild')")
+                    conn.execute("INSERT INTO windows_fts(windows_fts) VALUES ('rebuild')")
             finally:
                 self._close(conn)
 
@@ -487,9 +568,8 @@ class CaptionStore:
                 with conn:
                     if delete_videos:
                         # Only drop videos this source is the sole owner of.
-                        conn.execute(
-                            """
-                            DELETE FROM transcript_segments WHERE video_id IN (
+                        sole_owned = """
+                            IN (
                                 SELECT vs.video_id FROM video_sources vs
                                 WHERE vs.source_id = ?
                                 AND NOT EXISTS (
@@ -497,22 +577,13 @@ class CaptionStore:
                                     WHERE o.video_id = vs.video_id AND o.source_id != ?
                                 )
                             )
-                            """,
-                            (source_id, source_id),
-                        )
+                        """
+                        params = (source_id, source_id)
+                        self._unindex_windows(conn, sole_owned, params)
                         conn.execute(
-                            """
-                            DELETE FROM videos WHERE id IN (
-                                SELECT vs.video_id FROM video_sources vs
-                                WHERE vs.source_id = ?
-                                AND NOT EXISTS (
-                                    SELECT 1 FROM video_sources o
-                                    WHERE o.video_id = vs.video_id AND o.source_id != ?
-                                )
-                            )
-                            """,
-                            (source_id, source_id),
+                            f"DELETE FROM transcript_segments WHERE video_id {sole_owned}", params
                         )
+                        conn.execute(f"DELETE FROM videos WHERE id {sole_owned}", params)
                     conn.execute(
                         "DELETE FROM video_sources WHERE source_id = ?", (source_id,)
                     )
@@ -522,73 +593,121 @@ class CaptionStore:
 
     # ------------------------------------------------------------------ search
 
-    def search_segments(
+    def search(
         self,
         query: str,
+        *,
+        mode: str = "phrase",
+        whole_words: bool = True,
         source_id: str = "",
-        video_id: str = "",
-        limit: int = 500,
+        subtitle_type: str = "",
+        date_from: str = "",
+        date_to: str = "",
+        sort: str = "relevance",
+        limit: Optional[int] = 25,
         offset: int = 0,
     ) -> dict:
-        """Full-text search over caption segments.
+        """Full-text search over captions, grouped by video.
 
-        Returns ``{"results": [...], "total": int, "truncated": bool}``. Each
-        result carries a ``highlight`` string with matched terms wrapped in
-        ``\x02``/``\x03`` sentinels, which the UI turns into markup. Sentinels
-        avoid the escaping problem of embedding real HTML tags here.
+        Returns ``{"videos", "total_videos", "total_hits", "has_more"}``. Only
+        the ``limit`` videos from ``offset`` carry their hits (``limit=None``
+        means all of them). Each hit's ``highlight`` is its three-cue window
+        with matched terms wrapped in ``\\x02``/``\\x03`` sentinels, which the
+        UI turns into markup without having to trust any of it as HTML.
         """
+        empty = {"videos": [], "total_videos": 0, "total_hits": 0, "has_more": False}
         try:
-            match_expr = build_fts_query(query)
+            match_expr = build_fts_query(
+                query, mode if mode in SEARCH_MODES else "phrase", whole_words
+            )
         except SearchSyntaxError:
-            return {"results": [], "total": 0, "truncated": False}
+            return empty
 
-        where = ["segments_fts MATCH ?"]
-        params: list = [match_expr]
-        if video_id:
-            where.append("s.video_id = ?")
-            params.append(video_id)
+        where = []
+        params: dict = {"q": match_expr}
         if source_id:
             where.append(
                 "EXISTS (SELECT 1 FROM video_sources vs "
-                "WHERE vs.video_id = s.video_id AND vs.source_id = ?)"
+                "WHERE vs.video_id = v.id AND vs.source_id = :source_id)"
             )
-            params.append(source_id)
-        where_sql = " AND ".join(where)
+            params["source_id"] = source_id
+        if subtitle_type:
+            where.append("v.subtitle_type = :subtitle_type")
+            params["subtitle_type"] = subtitle_type
+        # upload_date is YYYYMMDD, so plain string comparison orders it.
+        if date_from:
+            where.append("v.upload_date >= :date_from")
+            params["date_from"] = date_from
+        if date_to:
+            where.append("v.upload_date != '' AND v.upload_date <= :date_to")
+            params["date_to"] = date_to
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+        order_sql = SEARCH_SORTS.get(sort, SEARCH_SORTS["relevance"])
 
         conn = self._connect()
         try:
-            total = conn.execute(
-                f"""
-                SELECT COUNT(*) FROM segments_fts
-                JOIN transcript_segments s ON s.id = segments_fts.rowid
-                WHERE {where_sql}
-                """,
-                params,
-            ).fetchone()[0]
-
-            rows = conn.execute(
-                f"""
-                SELECT s.video_id, s.start_ms, s.end_ms, s.text,
-                       highlight(segments_fts, 0, char(2), char(3)) AS highlight,
-                       v.title, v.channel, v.source_url, v.subtitle_type
-                FROM segments_fts
-                JOIN transcript_segments s ON s.id = segments_fts.rowid
-                JOIN videos v ON v.id = s.video_id
-                WHERE {where_sql}
-                ORDER BY bm25(segments_fts), v.upload_date DESC, s.start_ms
-                LIMIT ? OFFSET ?
-                """,
-                [*params, limit, offset],
-            ).fetchall()
-            return {
-                "results": [dict(row) for row in rows],
-                "total": total,
-                "truncated": total > offset + len(rows),
-            }
+            videos = [
+                dict(row)
+                for row in conn.execute(
+                    f"""
+                    {_HITS_CTE}
+                    SELECT v.id, v.title, v.channel, v.upload_date, v.duration,
+                           v.subtitle_type, v.subtitle_language,
+                           COUNT(*) AS hit_count, MIN(h.score) AS best
+                    FROM hits h
+                    JOIN transcript_segments s ON s.id = h.id
+                    JOIN videos v ON v.id = s.video_id
+                    {where_sql}
+                    GROUP BY v.id
+                    ORDER BY {order_sql}
+                    """,
+                    params,
+                )
+            ]
+            page = videos[offset:] if limit is None else videos[offset : offset + limit]
+            hits_by_video = self._hits_for(conn, match_expr, [v["id"] for v in page])
         except sqlite3.OperationalError as exc:
             raise SearchSyntaxError(str(exc)) from exc
         finally:
             self._close(conn)
+
+        for video in page:
+            video.pop("best")
+            video["hits"] = hits_by_video.get(video["id"], [])
+        return {
+            "videos": page,
+            "total_videos": len(videos),
+            "total_hits": sum(video["hit_count"] for video in videos),
+            "has_more": offset + len(page) < len(videos),
+        }
+
+    def _hits_for(self, conn: sqlite3.Connection, match_expr: str, video_ids: list[str]) -> dict:
+        hits: dict[str, list[dict]] = {}
+        # Chunked to stay under SQLite's bound-parameter limit when exporting.
+        for start in range(0, len(video_ids), 500):
+            chunk = video_ids[start : start + 500]
+            params = {"q": match_expr, **{f"v{i}": vid for i, vid in enumerate(chunk)}}
+            placeholders = ", ".join(f":v{i}" for i in range(len(chunk)))
+            rows = conn.execute(
+                f"""
+                {_HITS_CTE}
+                SELECT s.id, s.video_id, s.start_ms, length(s.text) AS cue_length,
+                       highlight(windows_fts, 0, char(2), char(3)) AS highlight,
+                       b.text AS before
+                FROM windows_fts
+                JOIN transcript_segments s ON s.id = windows_fts.rowid
+                LEFT JOIN transcript_segments b ON b.id = s.id - 1 AND b.video_id = s.video_id
+                WHERE windows_fts MATCH :q
+                  AND s.video_id IN ({placeholders})
+                  AND s.id IN (SELECT id FROM hits)
+                ORDER BY s.start_ms
+                """,
+                params,
+            )
+            for row in rows:
+                hit = dict(row)
+                hits.setdefault(hit.pop("video_id"), []).append(hit)
+        return hits
 
     def get_stats(self) -> dict:
         conn = self._connect()

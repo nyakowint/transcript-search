@@ -1,14 +1,13 @@
 <script>
-  import { RefreshCw, X } from 'lucide-svelte';
+  import { RefreshCw, X, ChevronRight, ChevronDown } from 'lucide-svelte';
+  import TranscriptPanel from './TranscriptPanel.svelte';
   import { formatDuration, formatUploadDate } from '../format.js';
   import { t } from '../i18n/index.js';
 
   let {
     videos = [],
-    missing = [],
-    selectedVideoId = '',
+    missingCount = 0,
     busy = false,
-    onselect,
     ondelete,
     onrefetch,
     ondeleteAll,
@@ -17,6 +16,7 @@
   } = $props();
 
   let filter = $state('');
+  let openId = $state('');
 
   const filtered = $derived.by(() => {
     const needle = filter.trim().toLowerCase();
@@ -35,11 +35,20 @@
   const hiddenCount = $derived(Math.max(0, filtered.length - visible.length));
 </script>
 
-<div class="video-list">
+<section class="video-list">
   <div class="list-header">
-    <span class="label">{t('videoList.videosLabel', videos.length)}</span>
+    <h2>{t('videoList.videosLabel', videos.length)}</h2>
     {#if videos.length > 0}
       <div class="header-actions">
+        {#if missingCount > 0}
+          <button
+            class="link"
+            type="button"
+            disabled={busy}
+            title={t('videoList.retryMissingTooltip')}
+            onclick={() => onretryMissing?.()}
+          >{t('videoList.retryMissing', missingCount)}</button>
+        {/if}
         <button
           class="link"
           type="button"
@@ -63,34 +72,48 @@
       <li class="empty">{t('videoList.nothingMatches', filter)}</li>
     {:else}
       {#each visible as video (video.id)}
-        <li class:active={video.id === selectedVideoId}>
-          <button type="button" class="video-btn" onclick={() => onselect?.(video.id)}>
-            <span class="video-title" title={video.title || video.id}>
-              {video.title || video.id}
-            </span>
-            <span class="video-meta">
-              <span class="pill" class:auto={video.subtitle_type === 'auto'} class:none={video.subtitle_type === 'none'}>
-                {video.subtitle_type === 'none'
-                  ? t('videoList.noCaptions')
-                  : t('videoList.subtitleInfo', video.subtitle_type, video.subtitle_language)}
-              </span>
-              {#if video.duration}<span>{formatDuration(video.duration)}</span>{/if}
-              {#if video.upload_date}<span>{formatUploadDate(video.upload_date)}</span>{/if}
-            </span>
-          </button>
-          <div class="row-actions">
+        <li class:open={video.id === openId}>
+          <div class="row">
             <button
               type="button"
-              title={t('videoList.refetchCaptions')}
-              disabled={busy}
-              onclick={() => onrefetch?.(video.id)}
+              class="video-btn"
+              disabled={video.subtitle_type === 'none'}
+              title={video.subtitle_type === 'none' ? video.error || '' : ''}
+              onclick={() => (openId = openId === video.id ? '' : video.id)}
             >
-              <RefreshCw size={12} />
+              <span class="chevron">
+                {#if video.id === openId}<ChevronDown size={14} />{:else}<ChevronRight size={14} />{/if}
+              </span>
+              <span class="video-title">{video.title || video.id}</span>
+              <span class="video-meta">
+                <span class="pill" class:auto={video.subtitle_type === 'auto'} class:none={video.subtitle_type === 'none'}>
+                  {video.subtitle_type === 'none'
+                    ? t('videoList.noCaptions')
+                    : t('videoList.subtitleInfo', video.subtitle_type, video.subtitle_language)}
+                </span>
+                {#if video.duration}<span>{formatDuration(video.duration)}</span>{/if}
+                {#if video.upload_date}<span>{formatUploadDate(video.upload_date)}</span>{/if}
+              </span>
             </button>
-            <button type="button" title={t('videoList.remove')} onclick={() => ondelete?.(video.id)}>
-              <X size={13} />
-            </button>
+            <div class="row-actions">
+              <button
+                type="button"
+                title={t('videoList.refetchCaptions')}
+                disabled={busy}
+                onclick={() => onrefetch?.(video.id)}
+              >
+                <RefreshCw size={13} />
+              </button>
+              <button type="button" title={t('videoList.remove')} onclick={() => ondelete?.(video.id)}>
+                <X size={14} />
+              </button>
+            </div>
           </div>
+          {#if video.id === openId}
+            <div class="transcript">
+              <TranscriptPanel videoId={video.id} />
+            </div>
+          {/if}
         </li>
       {/each}
       {#if hiddenCount > 0}
@@ -98,35 +121,13 @@
       {/if}
     {/if}
   </ul>
-
-  {#if missing.length > 0}
-    <div class="missing-section">
-      <div class="list-header">
-        <span class="label">{t('videoList.missingLabel', missing.length)}</span>
-        <button
-          class="link"
-          type="button"
-          disabled={busy}
-          title={t('videoList.retryMissingTooltip')}
-          onclick={() => onretryMissing?.()}
-        >{t('videoList.retry')}</button>
-      </div>
-      <ul class="missing-items">
-        {#each missing.slice(0, 50) as video}
-          <li title={video.error || ''}>{video.title || video.id}</li>
-        {/each}
-      </ul>
-    </div>
-  {/if}
-</div>
+</section>
 
 <style>
   .video-list {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    flex: 1;
-    min-height: 0;
+    gap: 10px;
   }
 
   .list-header {
@@ -134,11 +135,11 @@
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    flex-shrink: 0;
   }
 
-  .label {
-    font-size: 11px;
+  h2 {
+    margin: 0;
+    font-size: 12px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -147,16 +148,16 @@
 
   .header-actions {
     display: flex;
-    gap: 8px;
+    gap: 14px;
   }
 
   .link {
     background: transparent;
     border: none;
     color: var(--text-muted);
-    font-size: 11px;
+    font-size: 12px;
     cursor: pointer;
-    padding: 2px 0;
+    padding: 0;
   }
 
   .link:hover:not(:disabled) {
@@ -176,51 +177,71 @@
     background: var(--bg-input);
     border: 1px solid var(--border-input);
     color: var(--text);
-    padding: 6px 10px;
-    border-radius: 6px;
-    font-size: 12px;
-    flex-shrink: 0;
+    padding: 7px 10px;
+    border-radius: 7px;
+    font-size: 13px;
   }
 
   .video-items {
     list-style: none;
     padding: 0;
     margin: 0;
-    overflow-y: auto;
-    flex: 1;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-panel);
   }
 
-  .video-items li {
+  .video-items > li + li {
+    border-top: 1px solid var(--border);
+  }
+
+  .row {
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 7px 6px;
-    border-radius: 6px;
+    padding: 0 10px 0 0;
   }
 
-  .video-items li:hover {
-    background: var(--border);
+  .row:hover {
+    background: var(--bg-input);
   }
 
-  .video-items li.active {
-    background: var(--accent-subtle);
+  li:first-child .row {
+    border-radius: 10px 10px 0 0;
   }
 
   .video-btn {
     flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
     background: transparent;
     border: none;
     color: var(--text);
     text-align: left;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
     cursor: pointer;
-    padding: 0;
+    padding: 10px 0 10px 10px;
     min-width: 0;
   }
 
+  .video-btn:disabled {
+    cursor: default;
+    color: var(--text-muted);
+  }
+
+  .video-btn:disabled .chevron {
+    visibility: hidden;
+  }
+
+  .chevron {
+    display: flex;
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
   .video-title {
+    flex: 1;
+    min-width: 0;
     font-size: 13px;
     white-space: nowrap;
     overflow: hidden;
@@ -230,9 +251,10 @@
   .video-meta {
     display: flex;
     align-items: center;
-    gap: 6px;
-    font-size: 10px;
+    gap: 10px;
+    font-size: 11px;
     color: var(--text-muted);
+    flex-shrink: 0;
   }
 
   .pill {
@@ -255,12 +277,13 @@
 
   .row-actions {
     display: flex;
-    gap: 1px;
+    gap: 2px;
     opacity: 0;
     flex-shrink: 0;
   }
 
-  li:hover .row-actions {
+  .row:hover .row-actions,
+  .row-actions:focus-within {
     opacity: 1;
   }
 
@@ -269,14 +292,14 @@
     border: none;
     color: var(--text-muted);
     cursor: pointer;
-    padding: 3px;
+    padding: 4px;
     border-radius: 4px;
     display: flex;
   }
 
   .row-actions button:hover:not(:disabled) {
     color: var(--text);
-    background: var(--bg-input);
+    background: var(--border);
   }
 
   .row-actions button:disabled {
@@ -284,37 +307,14 @@
     cursor: default;
   }
 
+  .transcript {
+    padding: 4px 14px 14px 34px;
+  }
+
   .empty,
   .more {
     color: var(--text-muted);
-    font-size: 12px;
-    padding: 8px 4px;
-  }
-
-  .missing-section {
-    border-top: 1px solid var(--border);
-    padding-top: 10px;
-    margin-top: 4px;
-    flex-shrink: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .missing-items {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    max-height: 110px;
-    overflow-y: auto;
-  }
-
-  .missing-items li {
-    font-size: 11px;
-    color: var(--text-muted);
-    padding: 2px 4px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    font-size: 13px;
+    padding: 14px;
   }
 </style>

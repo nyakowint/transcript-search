@@ -48,6 +48,42 @@ const MARK_OPEN = String.fromCharCode(2);
 const MARK_CLOSE = String.fromCharCode(3);
 const MARK_RE = new RegExp(`${MARK_OPEN}([^${MARK_CLOSE}]*)${MARK_CLOSE}`, 'g');
 
+/**
+ * Split a search hit's highlight into runs, flagging the trailing context.
+ *
+ * A hit's highlight covers its own cue plus the next two, so it can show a
+ * match that runs across cues. Everything past the hit's cue (or past the end
+ * of a match that started in it) is only context and often holds the next
+ * hit's match, so it is marked `trailing` for the UI to tone down.
+ */
+export function splitHit(highlight, cueLength) {
+  const runs = splitHighlights(highlight);
+  let offset = 0;
+  let primaryEnd = cueLength;
+  for (const run of runs) {
+    offset += run.text.length;
+    if (run.match) {
+      primaryEnd = Math.max(primaryEnd, offset);
+      break;
+    }
+  }
+
+  const parts = [];
+  offset = 0;
+  for (const run of runs) {
+    const end = offset + run.text.length;
+    if (end <= primaryEnd || offset >= primaryEnd) {
+      parts.push({ ...run, trailing: offset >= primaryEnd });
+    } else {
+      const cut = primaryEnd - offset;
+      parts.push({ text: run.text.slice(0, cut), match: run.match, trailing: false });
+      parts.push({ text: run.text.slice(cut), match: run.match, trailing: true });
+    }
+    offset = end;
+  }
+  return parts;
+}
+
 /** Split an FTS5 highlight string into alternating plain and matched runs. */
 export function splitHighlights(highlight, fallback = '') {
   const source = highlight || fallback || '';

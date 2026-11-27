@@ -1,14 +1,22 @@
 <script>
   import { ExternalLink, Copy, Check } from 'lucide-svelte';
+  import { tick } from 'svelte';
+  import { apiClient } from '../services/api.js';
   import { formatTime, timestampUrl, copyText } from '../format.js';
   import { t } from '../i18n/index.js';
 
-  let { transcript = [], video = null, videoId = '' } = $props();
+  // hitIds marks matching lines; focusId is the line to scroll to.
+  let { videoId, hitIds = [], focusId = null } = $props();
 
+  let transcript = $state([]);
+  let video = $state(null);
+  let loading = $state(true);
+  let error = $state('');
   let filter = $state('');
   let copiedMs = $state(-1);
+  let list = $state();
 
-  const id = $derived(videoId || video?.id || '');
+  const hitSet = $derived(new Set(hitIds));
 
   const filtered = $derived.by(() => {
     const needle = filter.trim().toLowerCase();
@@ -16,91 +24,130 @@
     return transcript.filter((segment) => segment.text.toLowerCase().includes(needle));
   });
 
-  async function copyLink(ms) {
-    await copyText(timestampUrl(id, ms));
-    copiedMs = ms;
-    setTimeout(() => {
-      if (copiedMs === ms) copiedMs = -1;
-    }, 1200);
+  $effect(() => {
+    load(videoId);
+  });
+
+  $effect(() => {
+    if (!loading) scrollTo(focusId);
+  });
+
+  async function load(id) {
+    loading = true;
+    const response = await apiClient.getTranscript(id);
+    loading = false;
+    if (!response.ok) {
+      error = response.error;
+      return;
+    }
+    transcript = response.segments;
+    video = response.video;
   }
 
-  function open(ms) {
-    window.open(timestampUrl(id, ms), '_blank');
+  async function scrollTo(id) {
+    if (id == null) return;
+    await tick();
+    const row = list?.querySelector(`[data-id="${id}"]`);
+    if (!row) return;
+    // Scroll only this box; scrollIntoView would drag the whole page along.
+    list.scrollTop = row.offsetTop - list.clientHeight / 3;
+  }
+
+  async function copyLink(ms) {
+    await copyText(timestampUrl(videoId, ms));
+    flashCopied(ms);
   }
 
   async function copyAll() {
     await copyText(
       filtered.map((segment) => `[${formatTime(segment.start_ms)}] ${segment.text}`).join('\n')
     );
-    copiedMs = -2;
+    flashCopied(-2);
+  }
+
+  function flashCopied(key) {
+    copiedMs = key;
     setTimeout(() => {
-      if (copiedMs === -2) copiedMs = -1;
+      if (copiedMs === key) copiedMs = -1;
     }, 1200);
+  }
+
+  function open(ms) {
+    window.open(timestampUrl(videoId, ms), '_blank');
   }
 </script>
 
-<div class="transcript-panel">
-  {#if transcript.length > 0}
-    <div class="panel-header">
+<div class="transcript">
+  {#if loading}
+    <p class="empty">{t('transcript.loading')}</p>
+  {:else if error}
+    <p class="empty">{error}</p>
+  {:else if transcript.length === 0}
+    <p class="empty">{t('transcript.empty')}</p>
+  {:else}
+    <div class="toolbar">
+      <input type="text" bind:value={filter} placeholder={t('transcript.filterPlaceholder')} />
       <span class="count">
         {t('transcript.lines', { shown: filtered.length, total: transcript.length, hasFilter: !!filter.trim() })}
-        {#if video?.subtitle_type}
-          · {video.subtitle_type} {video.subtitle_language}
-        {/if}
+        {#if video?.subtitle_type}· {video.subtitle_type} {video.subtitle_language}{/if}
       </span>
       <button class="link" type="button" onclick={copyAll}>
         {copiedMs === -2 ? t('transcript.copied') : t('transcript.copyAll')}
       </button>
     </div>
-    <input class="filter" type="text" bind:value={filter} placeholder={t('transcript.filterPlaceholder')} />
-  {/if}
 
-  <div class="transcript-list">
-    {#if transcript.length === 0}
-      <p class="empty">{t('transcript.selectVideo')}</p>
-    {:else if filtered.length === 0}
-      <p class="empty">{t('transcript.noLinesMatch', filter)}</p>
-    {:else}
-      {#each filtered as segment (segment.start_ms)}
-        <div class="segment">
-          <button class="time" type="button" onclick={() => open(segment.start_ms)}>
+    <div class="lines" bind:this={list}>
+      {#if filtered.length === 0}
+        <p class="empty">{t('transcript.noLinesMatch', filter)}</p>
+      {/if}
+      {#each filtered as segment (segment.id)}
+        <div class="line" class:hit={hitSet.has(segment.id)} class:focus={segment.id === focusId} data-id={segment.id}>
+          <button class="time" type="button" title={t('common.openAtTime')} onclick={() => open(segment.start_ms)}>
             {formatTime(segment.start_ms)}
           </button>
           <span class="text">{segment.text}</span>
           <div class="actions">
-            <button type="button" title={t('transcript.open')} onclick={() => open(segment.start_ms)}>
+            <button type="button" title={t('common.openInBrowser')} onclick={() => open(segment.start_ms)}>
               <ExternalLink size={12} />
             </button>
-            <button type="button" title={t('transcript.copyLinkTooltip')} onclick={() => copyLink(segment.start_ms)}>
+            <button type="button" title={t('common.copyLink')} onclick={() => copyLink(segment.start_ms)}>
               {#if copiedMs === segment.start_ms}<Check size={12} />{:else}<Copy size={12} />{/if}
             </button>
           </div>
         </div>
       {/each}
-    {/if}
-  </div>
+    </div>
+  {/if}
 </div>
 
 <style>
-  .transcript-panel {
+  .transcript {
     display: flex;
     flex-direction: column;
-    flex: 1;
-    min-height: 0;
     gap: 8px;
   }
 
-  .panel-header {
+  .toolbar {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    flex-shrink: 0;
+    gap: 10px;
+  }
+
+  .toolbar input {
+    flex: 1;
+    min-width: 0;
+    background: var(--bg-input);
+    border: 1px solid var(--border-input);
+    color: var(--text);
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 12px;
   }
 
   .count {
     font-size: 11px;
     color: var(--text-muted);
+    white-space: nowrap;
   }
 
   .link {
@@ -110,38 +157,41 @@
     font-size: 11px;
     cursor: pointer;
     padding: 0;
+    white-space: nowrap;
   }
 
   .link:hover {
     color: var(--text);
   }
 
-  .filter {
-    background: var(--bg-input);
-    border: 1px solid var(--border-input);
-    color: var(--text);
-    padding: 6px 10px;
-    border-radius: 6px;
-    font-size: 12px;
-    flex-shrink: 0;
-  }
-
-  .transcript-list {
-    flex: 1;
+  .lines {
+    position: relative;
+    max-height: 380px;
     overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 4px;
   }
 
-  .segment {
+  .line {
     display: grid;
-    grid-template-columns: 52px 1fr auto;
+    grid-template-columns: 56px 1fr auto;
     gap: 10px;
-    padding: 7px 4px;
-    border-radius: 6px;
+    padding: 5px 6px;
+    border-radius: 5px;
     align-items: start;
   }
 
-  .segment:hover {
+  .line:hover {
     background: var(--border);
+  }
+
+  .line.hit {
+    background: var(--accent-subtle);
+  }
+
+  .line.focus {
+    box-shadow: inset 2px 0 0 var(--accent);
   }
 
   .time {
@@ -153,6 +203,7 @@
     padding: 0;
     cursor: pointer;
     text-align: left;
+    line-height: 1.6;
   }
 
   .time:hover {
@@ -165,14 +216,17 @@
     line-height: 1.45;
   }
 
+  .line.hit .text {
+    color: var(--text);
+  }
+
   .actions {
     display: flex;
     gap: 3px;
     opacity: 0;
-    transition: opacity 0.15s;
   }
 
-  .segment:hover .actions {
+  .line:hover .actions {
     opacity: 1;
   }
 
@@ -187,13 +241,12 @@
   }
 
   .actions button:hover {
-    background: var(--border);
     color: var(--text);
   }
 
   .empty {
     color: var(--text-muted);
-    font-size: 13px;
-    margin: 0;
+    font-size: 12px;
+    margin: 6px 2px;
   }
 </style>

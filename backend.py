@@ -8,6 +8,8 @@ run on a worker thread and report progress by pushing events into the page.
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import os
 import re
@@ -111,6 +113,54 @@ def _summarize_error(message: str) -> str:
             " links; try the channel's @handle URL instead."
         )
     return text
+
+
+RECENT_SEARCH_LIMIT = 10
+_MARKS_RE = re.compile("[\x02\x03]")
+
+
+def _hit_url(video_id: str, start_ms: int) -> str:
+    return f"https://www.youtube.com/watch?v={video_id}&t={start_ms // 1000}s"
+
+
+def _timestamp(start_ms: int) -> str:
+    minutes, seconds = divmod(start_ms // 1000, 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}:{minutes:02}:{seconds:02}" if hours else f"{minutes}:{seconds:02}"
+
+
+def _export_csv(result: dict) -> str:
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["video_title", "channel", "upload_date", "timestamp", "url", "text"])
+    for video in result["videos"]:
+        for hit in video["hits"]:
+            writer.writerow(
+                [
+                    video["title"],
+                    video["channel"],
+                    video["upload_date"],
+                    _timestamp(hit["start_ms"]),
+                    _hit_url(video["id"], hit["start_ms"]),
+                    _MARKS_RE.sub("", hit["highlight"]),
+                ]
+            )
+    return buffer.getvalue()
+
+
+def _export_markdown(query: str, result: dict) -> str:
+    lines = [f"# {query.strip()}", "", f"{result['total_hits']} hits in {result['total_videos']} videos", ""]
+    for video in result["videos"]:
+        meta = " · ".join(bit for bit in (video["channel"], video["upload_date"]) if bit)
+        lines.append(f"## [{video['title'] or video['id']}](https://www.youtube.com/watch?v={video['id']})")
+        if meta:
+            lines.append(meta)
+        lines.append("")
+        for hit in video["hits"]:
+            text = hit["highlight"].replace("\x02", "**").replace("\x03", "**")
+            lines.append(f"- [{_timestamp(hit['start_ms'])}]({_hit_url(video['id'], hit['start_ms'])}) {text}")
+        lines.append("")
+    return "\n".join(lines)
 
 
 def _ok(**payload) -> dict:
@@ -500,21 +550,67 @@ class Api:
             video=self._store.get_video(video_id),
         )
 
-    def search_transcripts(
-        self,
-        query: str,
-        source_id: str = "",
-        video_id: str = "",
-        limit: int = 300,
-        offset: int = 0,
-    ) -> dict:
+    def _search(self, query: str, options: dict | None, **overrides) -> dict:
+        allowed = {
+            "mode", "whole_words", "source_id", "subtitle_type",
+            "date_from", "date_to", "sort", "limit", "offset",
+        }
+        kwargs = {key: value for key, value in (options or {}).items() if key in allowed}
+        kwargs.update(overrides)
+        return self._store.search(query, **kwargs)
+
+    def search_transcripts(self, query: str, options: dict | None = None) -> dict:
         try:
-            result = self._store.search_segments(
-                query, source_id=source_id, video_id=video_id, limit=limit, offset=offset
-            )
+            return _ok(**self._search(query, options))
         except SearchSyntaxError as exc:
             return _err(str(exc))
-        return _ok(**result)
+
+    def export_search(self, query: str, options: dict | None = None, fmt: str = "csv") -> dict:
+        """Write every hit for a search to a CSV or Markdown file the user picks."""
+        import webview
+
+        if not self._window:
+            return _err("Window is not ready.")
+        try:
+            result = self._search(query, options, limit=None, offset=0)
+        except SearchSyntaxError as exc:
+            return _err(str(exc))
+        if not result["videos"]:
+            return _err("Nothing to export.")
+
+        ext = "md" if fmt == "md" else "csv"
+        stem = re.sub(r"[^\w-]+", "-", query.strip()).strip("-")[:40] or "search"
+        chosen = self._window.create_file_dialog(
+            webview.FileDialog.SAVE, save_filename=f"{stem}.{ext}"
+        )
+        if not chosen:
+            return _ok(path="")
+        path = Path(chosen if isinstance(chosen, str) else chosen[0])
+        content = _export_markdown(query, result) if ext == "md" else _export_csv(result)
+        # utf-8-sig so Excel opens the CSV with the right encoding.
+        path.write_text(content, encoding="utf-8-sig" if ext == "csv" else "utf-8", newline="")
+        return _ok(path=str(path))
+
+    # ------------------------------------------------------- recent searches
+
+    def get_recent_searches(self) -> dict:
+        try:
+            recent = json.loads(self._store.get_setting("recent_searches", "[]"))
+        except ValueError:
+            recent = []
+        return _ok(searches=recent)
+
+    def add_recent_search(self, query: str) -> dict:
+        query = (query or "").strip()
+        recent = self.get_recent_searches()["searches"]
+        if query:
+            recent = [query, *(item for item in recent if item != query)][:RECENT_SEARCH_LIMIT]
+            self._store.set_setting("recent_searches", json.dumps(recent))
+        return _ok(searches=recent)
+
+    def clear_recent_searches(self) -> dict:
+        self._store.set_setting("recent_searches", "[]")
+        return _ok(searches=[])
 
     def get_missing_subtitles(self) -> dict:
         return _ok(videos=self._store.get_missing_subtitles())
