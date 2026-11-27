@@ -1,6 +1,6 @@
 {
   "tasks": {
-    "dev": "deno task build && python app.py",
+    "dev": "python app.py",
     "build": "deno run -A npm:vite build",
     "build:exe": "deno task build && pyinstaller transcript-search.spec --distpath build/app --workpath build/pyinstaller --noconfirm",
     "preview": "deno run -A npm:vite preview",

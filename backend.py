@@ -90,8 +90,6 @@ class Job:
             "failed": self.failed,
             "added": self.added,
             "skipped": self.skipped,
-            # The full list can run to thousands on a bad night; the UI only
-            # ever shows a handful, so cap what crosses the bridge.
             "errors": self.errors[:50],
             "error_count": len(self.errors),
             "started_at": self.started_at,
@@ -103,7 +101,7 @@ _EXTRACTOR_TAG_RE = re.compile(r"^\[[^\]]+\]\s*")
 
 
 def _summarize_error(message: str) -> str:
-    """Turn a raw yt-dlp stderr line into something worth showing a user."""
+    """Dumb down the ytdlp error messages to something readable"""
     text = (message or "").strip()
     text = text.removeprefix("ERROR:").strip()
     text = _EXTRACTOR_TAG_RE.sub("", text)
@@ -164,6 +162,7 @@ class Api:
         path = raw_path.strip().strip('"').strip("'")
         if not path:
             return ""
+        # lol chopped unc
         has_unc_prefix = path.startswith("\\\\")
         if has_unc_prefix:
             path = "__UNC__" + path[2:]

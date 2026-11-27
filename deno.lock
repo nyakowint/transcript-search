@@ -4,6 +4,7 @@
     "npm:@sveltejs/vite-plugin-svelte@^6.2.4": "6.2.4_svelte@5.48.3__acorn@8.15.0_vite@6.4.1__picomatch@4.0.3",
     "npm:lucide-svelte@0.469": "0.469.0_svelte@5.48.3__acorn@8.15.0",
     "npm:svelte@^5.48.2": "5.48.3_acorn@8.15.0",
+    "npm:vite-plugin-singlefile@^2.1.0": "2.3.4_vite@6.4.1__picomatch@4.0.3",
     "npm:vite@*": "6.4.1_picomatch@4.0.3",
     "npm:vite@6": "6.4.1_picomatch@4.0.3"
   },
@@ -382,13 +383,7 @@
       ]
     },
     "fdir@6.5.0_picomatch@4.0.3": {
-      "integrity": "sha512-tIbYtZbucOs0BRGqPJkshJUYdL+SDH7dVM8gjy+ERp3WAUjLEFJE+02kanyHtwjWOnwrKYBiwAmM0p4kLJAnXg==",
-      "dependencies": [
-        "picomatch"
-      ],
-      "optionalPeers": [
-        "picomatch"
-      ]
+      "integrity": "sha512-tIbYtZbucOs0BRGqPJkshJUYdL+SDH7dVM8gjy+ERp3WAUjLEFJE+02kanyHtwjWOnwrKYBiwAmM0p4kLJAnXg=="
     },
     "fsevents@2.3.3": {
       "integrity": "sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==",
@@ -408,7 +403,8 @@
       "integrity": "sha512-PMIJ8jrFqVUsXJz4d1yfAQplaGhNOahwwkzbunha8DhpiD73xqX24n8dE1dPpUk3vcrdWVsHc1y/liHHotOnGQ==",
       "dependencies": [
         "svelte"
-      ]
+      ],
+      "deprecated": true
     },
     "magic-string@0.30.21": {
       "integrity": "sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==",
@@ -426,8 +422,8 @@
     "picocolors@1.1.1": {
       "integrity": "sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA=="
     },
-    "picomatch@4.0.3": {
-      "integrity": "sha512-5gTmgEY/sqK6gFXLIsQNH19lWb4ebPDLA4SdLP7dsWkIXHWlG66oPuVvXSGFPppYZz8ZDZq0dYYrbHfBCVUb1Q=="
+    "picomatch@4.0.7": {
+      "integrity": "sha512-qcJu88Q2IWqJsDD529JKMdwGm/dvInW4HvQnRwiH9JtihJvzGOscDtHE3x1pBKeUOTysQ8kVmLnJ2kJu7yhcGA=="
     },
     "postcss@8.5.6": {
       "integrity": "sha512-3Ybi1tAuwAP9s0r1UQ2J4n5Y0G05bJkpUIO0/bI9MhwmD70S5aTWbXGBwxHrelT+XM1k6dM0pk+SwNkpTRN7Pg==",
@@ -500,6 +496,13 @@
       "dependencies": [
         "fdir",
         "picomatch"
+      ]
+    },
+    "vite-plugin-singlefile@2.3.4_vite@6.4.1__picomatch@4.0.3": {
+      "integrity": "sha512-1FAhlTCL6KJDpSUudrVU+gspapvS+tmKCg70vwNaAU6tyXn3E/C6+NnwQIze06byhBRv7VggZ78K0h+J/Rsdrg==",
+      "dependencies": [
+        "picomatch",
+        "vite"
       ]
     },
     "vite@6.4.1_picomatch@4.0.3": {

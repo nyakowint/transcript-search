@@ -1,9 +1,4 @@
-"""Caption track selection and subtitle parsing.
-
-YouTube exposes every caption track as a set of format URLs inside the yt-dlp
-info JSON. We pick one track, fetch that URL over plain HTTP, and parse it --
-no second yt-dlp invocation and no media download.
-
+"""
 ``json3`` is preferred over ``vtt``: it is YouTube's native timedtext format and
 auto-generated tracks come back as clean, non-overlapping events. The rolling
 duplicate text that plagues auto-generated WebVTT is an artifact of the VTT
@@ -23,7 +18,7 @@ TIME_RANGE_RE = re.compile(
 )
 TAG_RE = re.compile(r"<[^>]+>")
 
-# Ordered by how cheap and lossless they are to parse.
+# Ordered by how cheap and lossless they are to parse
 FORMAT_PREFERENCE = ("json3", "vtt", "srv3", "srv1", "ttml")
 
 

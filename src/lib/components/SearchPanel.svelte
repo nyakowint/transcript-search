@@ -1,6 +1,7 @@
 <script>
   import { Search, ExternalLink, Copy, Check } from 'lucide-svelte';
   import { formatTime, timestampUrl, copyText, splitHighlights } from '../format.js';
+  import { t } from '../i18n/index.js';
 
   let {
     results = [],
@@ -76,23 +77,23 @@
       type="text"
       bind:value={input}
       oninput={handleInput}
-      placeholder={hasContent ? `Search ${scopeLabel}...` : 'Fetch some captions first'}
+      placeholder={hasContent ? t('search.searchScope', scopeLabel) : t('search.fetchFirst')}
       onkeydown={(event) => event.key === 'Enter' && submit()}
     />
-    <button class="search-btn" type="button" aria-label="Search" onclick={submit}>
+    <button class="search-btn" type="button" aria-label={t('search.searchAria')} onclick={submit}>
       <Search size={18} />
     </button>
   </div>
 
   {#if input.trim() && !searching && total === 0}
-    <p class="no-results">No matches for "{input.trim()}" in {scopeLabel}.</p>
+    <p class="no-results">{t('search.noResults', input.trim(), scopeLabel)}</p>
   {/if}
 
   {#if results.length > 0}
     <div class="results">
       <div class="results-header">
-        {total} match{total === 1 ? '' : 'es'} in {scopeLabel}
-        {#if truncated}<span class="muted"> · showing first {results.length}</span>{/if}
+        {t('search.resultsHeader', total, scopeLabel)}
+        {#if truncated}<span class="muted"> · {t('search.showingFirst', results.length)}</span>{/if}
       </div>
 
       {#each grouped as group}
@@ -100,12 +101,12 @@
           <button class="group-head" type="button" onclick={() => onopenVideo?.(group.videoId)}>
             <span class="group-title">{group.title || group.videoId}</span>
             <span class="group-channel">{group.channel || ''}</span>
-            {#if group.subtitleType === 'auto'}<span class="auto-tag">auto</span>{/if}
+            {#if group.subtitleType === 'auto'}<span class="auto-tag">{t('search.auto')}</span>{/if}
           </button>
 
           {#each group.hits as hit}
             <div class="hit">
-              <button class="time" type="button" title="Open at this time" onclick={() => open(hit)}>
+              <button class="time" type="button" title={t('search.openAtTime')} onclick={() => open(hit)}>
                 {formatTime(hit.start_ms)}
               </button>
               <span class="text">
@@ -114,10 +115,10 @@
                 {/each}
               </span>
               <div class="actions">
-                <button type="button" title="Open in browser" onclick={() => open(hit)}>
+                <button type="button" title={t('search.openInBrowser')} onclick={() => open(hit)}>
                   <ExternalLink size={12} />
                 </button>
-                <button type="button" title="Copy timestamped link" onclick={() => copyLink(hit)}>
+                <button type="button" title={t('search.copyLink')} onclick={() => copyLink(hit)}>
                   {#if copiedKey === `${hit.video_id}-${hit.start_ms}`}
                     <Check size={12} />
                   {:else}

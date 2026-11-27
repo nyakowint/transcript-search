@@ -34,15 +34,14 @@ or Linux x64 (every commit will have a artifact + pre-release). no installer, it
    pip install -r requirements.txt
    ```
 
-2. Build the UI:
-   ```
-   deno task build
-   ```
-
-3. Run the app:
+2. Run the app:
    ```
    python app.py
    ```
+
+The UI builds into a single `build/ui/index.html`. `python app.py` rebuilds it
+whenever it is missing or older than `src/`, so `deno task build` is only needed
+for packaging.
 
 Set `TRANSCRIPT_SEARCH_YTDLP` to point at an existing yt-dlp binary if you don't
 want the app managing its own copy.

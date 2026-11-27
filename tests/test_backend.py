@@ -1,17 +1,20 @@
 """Offline tests: no network, no yt-dlp, no webview."""
 
 import json
+import os
 import sqlite3
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from captions import parse_json3, parse_vtt, select_track  # noqa: E402
 from ingest import IngestOptions, build_targets  # noqa: E402
 from store import CaptionStore, SearchSyntaxError, build_fts_query  # noqa: E402
+from ui_bundle import UI_RELATIVE_PATH, needs_build, resolve_ui  # noqa: E402
 from ytdlp_url import classify_url, parse_input_urls  # noqa: E402
 
 
@@ -448,6 +451,44 @@ class IngestOptionsTests(unittest.TestCase):
     def test_from_dict_accepts_a_comma_separated_language_string(self):
         options = IngestOptions.from_dict({"preferred_languages": "en, ja"})
         self.assertEqual(options.preferred_languages, ["en", "ja"])
+
+
+class UiBundleTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        (self.root / "src").mkdir()
+        self.source = self.root / "src" / "main.js"
+        self.source.write_text("x")
+        self.ui = self.root / UI_RELATIVE_PATH
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def write_ui(self, mtime):
+        self.ui.parent.mkdir(parents=True, exist_ok=True)
+        self.ui.write_text("<html></html>")
+        os.utime(self.ui, (mtime, mtime))
+
+    def test_missing_ui_needs_build(self):
+        self.assertTrue(needs_build(self.root))
+
+    def test_ui_older_than_sources_needs_build(self):
+        self.write_ui(self.source.stat().st_mtime - 10)
+        self.assertTrue(needs_build(self.root))
+
+    def test_fresh_ui_needs_no_build(self):
+        self.write_ui(self.source.stat().st_mtime + 10)
+        self.assertFalse(needs_build(self.root))
+
+    def test_stale_ui_is_kept_when_rebuild_fails(self):
+        self.write_ui(self.source.stat().st_mtime - 10)
+        with mock.patch("ui_bundle._build", return_value=False):
+            self.assertEqual(resolve_ui(self.root), self.ui)
+
+    def test_no_ui_and_failed_build_resolves_to_none(self):
+        with mock.patch("ui_bundle._build", return_value=False):
+            self.assertIsNone(resolve_ui(self.root))
 
 
 if __name__ == "__main__":

@@ -6,7 +6,14 @@ function start() {
   if (!target) {
     throw new Error('App mount point not found.');
   }
-  mount(App, { target });
+  try {
+    mount(App, { target });
+  } catch (error) {
+    // Without this a startup crash is just an empty window.
+    target.style.cssText = 'padding:24px;font:13px monospace;white-space:pre-wrap;color:#ff8a8a';
+    target.textContent = `The UI failed to start:\n\n${error?.stack || error}`;
+    throw error;
+  }
 }
 
 if (document.readyState === 'loading') {

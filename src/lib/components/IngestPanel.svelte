@@ -1,5 +1,6 @@
 <script>
   import { ChevronDown, ChevronRight } from 'lucide-svelte';
+  import { t } from '../i18n/index.js';
 
   let {
     settings = {},
@@ -12,9 +13,9 @@
   let optionsOpen = $state(false);
 
   const TAB_LABELS = {
-    videos: 'Videos',
-    shorts: 'Shorts',
-    streams: 'Live',
+    videos: t('ingest.tabVideos'),
+    shorts: t('ingest.tabShorts'),
+    streams: t('ingest.tabLive'),
   };
 
   const selectedTabs = $derived(
@@ -54,23 +55,23 @@
   <textarea
     bind:value={urlsInput}
     onkeydown={handleKeydown}
-    placeholder="Channel, playlist, or video URLs — one per line&#10;e.g. youtube.com/@3blue1brown"
+    placeholder={t('ingest.urlsPlaceholder')}
     rows="3"
   ></textarea>
 
   <button class="primary" onclick={submit} disabled={busy || !urlsInput.trim()}>
-    {busy ? 'Fetching...' : 'Fetch captions'}
+    {busy ? t('ingest.fetching') : t('ingest.fetchCaptions')}
   </button>
 
   <button class="disclosure" type="button" onclick={() => (optionsOpen = !optionsOpen)}>
     {#if optionsOpen}<ChevronDown size={13} />{:else}<ChevronRight size={13} />{/if}
-    Options
+    {t('ingest.options')}
   </button>
 
   {#if optionsOpen}
     <div class="options">
       <div class="field">
-        <span class="field-label">Channel tabs</span>
+        <span class="field-label">{t('ingest.channelTabs')}</span>
         <div class="chips">
           {#each Object.entries(TAB_LABELS) as [tab, label]}
             <button
@@ -84,12 +85,12 @@
       </div>
 
       <div class="field">
-        <label class="field-label" for="langs">Preferred languages</label>
+        <label class="field-label" for="langs">{t('ingest.preferredLanguages')}</label>
         <input
           id="langs"
           type="text"
           value={settings.preferred_languages || 'en'}
-          placeholder="en, ja"
+          placeholder={t('ingest.preferredLanguagesPlaceholder')}
           onchange={(e) => setSetting('preferred_languages', e.currentTarget.value)}
         />
       </div>
@@ -100,7 +101,7 @@
           checked={settings.allow_auto !== '0'}
           onchange={(e) => setSetting('allow_auto', e.currentTarget.checked ? '1' : '0')}
         />
-        Use auto-generated captions when there is no manual track
+        {t('ingest.allowAuto')}
       </label>
 
       <label class="check">
@@ -110,7 +111,7 @@
           onchange={(e) =>
             setSetting('allow_other_languages', e.currentTarget.checked ? '1' : '0')}
         />
-        Fall back to other languages
+        {t('ingest.allowOtherLanguages')}
       </label>
 
       <label class="check">
@@ -119,12 +120,12 @@
           checked={settings.skip_existing !== '0'}
           onchange={(e) => setSetting('skip_existing', e.currentTarget.checked ? '1' : '0')}
         />
-        Skip videos already stored
+        {t('ingest.skipExisting')}
       </label>
 
       <div class="row">
         <div class="field">
-          <label class="field-label" for="concurrency">Parallel</label>
+          <label class="field-label" for="concurrency">{t('ingest.concurrency')}</label>
           <input
             id="concurrency"
             type="number"
@@ -135,7 +136,7 @@
           />
         </div>
         <div class="field">
-          <label class="field-label" for="maxvideos">Limit (0 = all)</label>
+          <label class="field-label" for="maxvideos">{t('ingest.maxVideos')}</label>
           <input
             id="maxvideos"
             type="number"

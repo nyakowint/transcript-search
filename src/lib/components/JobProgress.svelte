@@ -1,5 +1,6 @@
 <script>
   import { X } from 'lucide-svelte';
+  import { t } from '../i18n/index.js';
 
   let { job = null, oncancel } = $props();
 
@@ -13,20 +14,20 @@
 
   const headline = $derived.by(() => {
     if (!job) return '';
-    if (job.status === 'error') return job.message || 'Fetch failed';
-    if (job.status === 'cancelled') return 'Cancelled';
+    if (job.status === 'error') return job.message || t('job.fetchFailed');
+    if (job.status === 'cancelled') return t('job.cancelled');
     if (job.status === 'done') {
       if (job.message) return job.message;
-      const bits = [`${job.ok} fetched`];
-      if (job.skipped) bits.push(`${job.skipped} already stored`);
-      if (job.missing) bits.push(`${job.missing} without captions`);
-      if (job.failed) bits.push(`${job.failed} failed`);
+      const bits = [t('job.fetched', job.ok)];
+      if (job.skipped) bits.push(t('job.alreadyStored', job.skipped));
+      if (job.missing) bits.push(t('job.withoutCaptions', job.missing));
+      if (job.failed) bits.push(t('job.failed', job.failed));
       return bits.join(' · ');
     }
     if (job.phase === 'expanding') {
-      return job.message || 'Finding videos...';
+      return job.message || t('job.findingVideos');
     }
-    return `${job.completed} / ${job.total} · ${job.current || 'working...'}`;
+    return t('job.progress', { completed: job.completed, total: job.total, current: job.current });
   });
 </script>
 
@@ -35,7 +36,7 @@
     <div class="job-top">
       <span class="job-label">{job.label}</span>
       {#if running}
-        <button class="cancel" type="button" title="Cancel" onclick={() => oncancel?.()}>
+        <button class="cancel" type="button" title={t('job.cancel')} onclick={() => oncancel?.()}>
           <X size={14} />
         </button>
       {/if}
@@ -49,7 +50,7 @@
 
     {#if job.error_count > 0}
       <details class="errors">
-        <summary>{job.error_count} error{job.error_count === 1 ? '' : 's'}</summary>
+        <summary>{t('job.errorCount', job.error_count)}</summary>
         <ul>
           {#each job.errors as item}
             <li>{item.video_id || item.url || ''} {item.error}</li>

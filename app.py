@@ -1,42 +1,25 @@
 import sys
-from pathlib import Path
+from typing import Any
 
 import webview
 
 from backend import Api
-
-
-def _resource_dir() -> Path:
-    """Root the UI and icon paths resolve against.
-
-    PyInstaller unpacks bundled data into ``sys._MEIPASS``; from source it is
-    just the project directory. Resolving explicitly keeps the app working when
-    it is launched from some other working directory.
-    """
-    bundle_dir = getattr(sys, "_MEIPASS", None)
-    if bundle_dir:
-        return Path(bundle_dir)
-    return Path(__file__).resolve().parent
+from ui_bundle import missing_ui_page, resolve_ui, resource_dir
 
 
 def main() -> None:
-    root = _resource_dir()
-    ui_path = root / "build" / "ui" / "index.html"
-    if not ui_path.exists():
-        raise SystemExit(
-            f"UI not built at {ui_path}. Run `deno task build` first."
-        )
-
+    root = resource_dir()
+    ui_path = resolve_ui(root)
     icon_path = root / "src" / "public" / "favicon.ico"
+    window_kwargs: dict[str, Any] = {"width": 1280, "height": 860, "min_size": (900, 600)}
+
+    if ui_path is None:
+        webview.create_window("Transcript Search", html=missing_ui_page(root), **window_kwargs)
+        webview.start()
+        return
+
     api = Api()
-    window = webview.create_window(
-        "Transcript Search",
-        url=str(ui_path),
-        js_api=api,
-        width=1280,
-        height=860,
-        min_size=(900, 600),
-    )
+    window = webview.create_window("Transcript Search", url=str(ui_path), js_api=api, **window_kwargs)
     api.set_window(window)
 
     debug = "--debug" in sys.argv
@@ -47,7 +30,7 @@ def main() -> None:
     def on_started() -> None:
         api.prepare_ytdlp()
 
-    start_kwargs = {"debug": debug, "http_server": True, "func": on_started}
+    start_kwargs: dict[str, Any] = {"debug": debug, "http_server": True, "func": on_started}
     if icon_path.exists():
         start_kwargs["icon"] = str(icon_path)
     webview.start(**start_kwargs)

@@ -1,5 +1,6 @@
 <script>
   import { RefreshCw, Trash2, Radio, ListVideo } from 'lucide-svelte';
+  import { t } from '../i18n/index.js';
 
   let {
     sources = [],
@@ -13,11 +14,11 @@
 
 {#if sources.length > 0}
   <div class="sources">
-    <span class="label">Channels &amp; playlists</span>
+    <span class="label">{t('sources.label')}</span>
     <ul>
       <li class:active={activeSourceId === ''}>
         <button class="pick" type="button" onclick={() => onselect?.('')}>
-          <span class="name">All sources</span>
+          <span class="name">{t('sources.allSources')}</span>
         </button>
       </li>
       {#each sources as source}
@@ -38,7 +39,7 @@
           <div class="row-actions">
             <button
               type="button"
-              title="Check for new videos"
+              title={t('sources.checkForNew')}
               disabled={busy}
               onclick={() => onsync?.(source.id, false)}
             >
@@ -46,7 +47,7 @@
             </button>
             <button
               type="button"
-              title="Remove this source"
+              title={t('sources.removeSource')}
               onclick={() => ondelete?.(source)}
             >
               <Trash2 size={13} />

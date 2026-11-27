@@ -1,16 +1,18 @@
 <script>
+  import { t } from '../i18n/index.js';
+
   let { cookiesPath = '', cookiesBrowser = '', onchange, onbrowse } = $props();
 
   const browsers = [
-    { label: 'None', value: '' },
-    { label: 'Chrome', value: 'chrome' },
-    { label: 'Edge', value: 'edge' },
-    { label: 'Firefox', value: 'firefox' },
-    { label: 'Brave', value: 'brave' },
-    { label: 'Vivaldi', value: 'vivaldi' },
-    { label: 'Opera', value: 'opera' },
-    { label: 'Chromium', value: 'chromium' },
-    { label: 'Safari', value: 'safari' },
+    { label: t('cookies.browsers.none'), value: '' },
+    { label: t('cookies.browsers.chrome'), value: 'chrome' },
+    { label: t('cookies.browsers.edge'), value: 'edge' },
+    { label: t('cookies.browsers.firefox'), value: 'firefox' },
+    { label: t('cookies.browsers.brave'), value: 'brave' },
+    { label: t('cookies.browsers.vivaldi'), value: 'vivaldi' },
+    { label: t('cookies.browsers.opera'), value: 'opera' },
+    { label: t('cookies.browsers.chromium'), value: 'chromium' },
+    { label: t('cookies.browsers.safari'), value: 'safari' },
   ];
 
   function emit(patch) {
@@ -20,23 +22,23 @@
 
 <div class="cookies">
   <p class="hint">
-    Only needed for age-restricted, members-only, or rate-limited fetches.
+    {t('cookies.hint')}
   </p>
   <div class="field">
-    <label for="cookies-path">Cookies file</label>
+    <label for="cookies-path">{t('cookies.fileLabel')}</label>
     <div class="input-group">
       <input
         id="cookies-path"
         type="text"
         bind:value={cookiesPath}
         onchange={() => emit({ cookies_path: cookiesPath })}
-        placeholder="Path to cookies.txt"
+        placeholder={t('cookies.filePlaceholder')}
       />
-      <button class="secondary" type="button" onclick={() => onbrowse?.()}>Browse</button>
+      <button class="secondary" type="button" onclick={() => onbrowse?.()}>{t('cookies.browse')}</button>
     </div>
   </div>
   <div class="field">
-    <label for="cookies-browser">Or read cookies from a browser</label>
+    <label for="cookies-browser">{t('cookies.browserLabel')}</label>
     <select
       id="cookies-browser"
       bind:value={cookiesBrowser}

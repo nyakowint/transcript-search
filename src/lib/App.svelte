@@ -7,6 +7,7 @@
   import TranscriptPanel from './components/TranscriptPanel.svelte';
   import VideoListPanel from './components/VideoListPanel.svelte';
   import { apiClient, onBackendEvent } from './services/api.js';
+  import { t } from './i18n/index.js';
   import { FileText, Sun, Moon, X, Settings } from 'lucide-svelte';
 
   let status = $state('');
@@ -37,7 +38,7 @@
 
   const busy = $derived(job?.status === 'running');
   const activeSource = $derived(sources.find((source) => source.id === activeSourceId));
-  const scopeLabel = $derived(activeSource ? activeSource.title || activeSource.id : 'everything');
+  const scopeLabel = $derived(activeSource ? activeSource.title || activeSource.id : t('app.everything'));
   const hasContent = $derived((stats.segments || 0) > 0);
 
   $effect(() => {
@@ -102,9 +103,9 @@
 
   function confirmRefetchAll() {
     confirmModal = {
-      title: `Refetch all ${videos.length} videos?`,
-      body: 'Captions are downloaded again and existing transcripts are replaced. Nothing is deleted if a fetch fails.',
-      confirmLabel: 'Refetch all',
+      title: t('app.confirmRefetchAllTitle', videos.length),
+      body: t('app.confirmRefetchAllBody'),
+      confirmLabel: t('app.confirmRefetchAllLabel'),
       danger: false,
       action: async () => {
         const response = await apiClient.refetchAll('all');
@@ -182,9 +183,9 @@
 
   function confirmDeleteAll() {
     confirmModal = {
-      title: 'Clear the whole library?',
-      body: `This removes all ${stats.videos || 0} videos, ${stats.sources || 0} sources, and their transcripts. It cannot be undone.`,
-      confirmLabel: 'Clear everything',
+      title: t('app.confirmClearTitle'),
+      body: t('app.confirmClearBody', { videos: stats.videos || 0, sources: stats.sources || 0 }),
+      confirmLabel: t('app.confirmClearLabel'),
       danger: true,
       action: async () => {
         await apiClient.deleteAllVideos();
@@ -196,17 +197,17 @@
         activeSourceId = '';
         transcriptOpen = false;
         await refreshLists();
-        setStatus('Library cleared.');
+        setStatus(t('app.libraryCleared'));
       },
     };
   }
 
   function confirmDeleteSource(source) {
     confirmModal = {
-      title: `Remove ${source.title || source.id}?`,
-      body: `Also delete the ${source.video_count} videos that came from it? Videos that also belong to another source are kept either way.`,
-      confirmLabel: 'Remove source only',
-      extraLabel: 'Remove source and videos',
+      title: t('app.confirmRemoveSourceTitle', source.title || source.id),
+      body: t('app.confirmRemoveSourceBody', source.video_count),
+      confirmLabel: t('app.confirmRemoveSourceOnly'),
+      extraLabel: t('app.confirmRemoveSourceAndVideos'),
       danger: true,
       action: async () => {
         await apiClient.deleteSource(source.id, false);
@@ -274,11 +275,11 @@
 <div class="app">
   <aside class="sidebar left">
     <div class="sidebar-header">
-      <span class="sidebar-title">Library</span>
+      <span class="sidebar-title">{t('app.sidebarTitle')}</span>
       <button
         class="icon-btn-sm"
-        title="Settings"
-        aria-label="Settings"
+        title={t('app.settingsTooltip')}
+        aria-label={t('app.settingsTooltip')}
         onclick={() => (settingsOpen = !settingsOpen)}
       >
         <Settings size={15} />
@@ -341,16 +342,16 @@
       <button
         class="icon-btn"
         class:active={transcriptOpen}
-        title="Transcript"
-        aria-label="Toggle transcript"
+        title={t('app.transcriptTooltip')}
+        aria-label={t('app.toggleTranscript')}
         onclick={() => (transcriptOpen = !transcriptOpen)}
       >
         <FileText size={18} />
       </button>
       <button
         class="icon-btn"
-        title={darkMode ? 'Light mode' : 'Dark mode'}
-        aria-label="Toggle theme"
+        title={darkMode ? t('app.lightMode') : t('app.darkMode')}
+        aria-label={t('app.toggleTheme')}
         onclick={() => (darkMode = !darkMode)}
       >
         {#if darkMode}<Sun size={18} />{:else}<Moon size={18} />{/if}
@@ -359,11 +360,10 @@
 
     <section class="hero">
       <div class="hero-head">
-        <h1>Transcript Search</h1>
+        <h1>{t('app.title')}</h1>
         {#if hasContent}
           <p class="subtitle">
-            {stats.videos} videos · {stats.segments.toLocaleString()} lines
-            {#if stats.missing}· {stats.missing} without captions{/if}
+            {t('app.stats', { videos: stats.videos, segments: stats.segments, missing: stats.missing })}
           </p>
         {/if}
       </div>
@@ -384,9 +384,9 @@
   <aside class="sidebar right" class:open={transcriptOpen}>
     <div class="sidebar-header">
       <span class="sidebar-title" title={selectedVideo?.title || ''}>
-        {selectedVideo?.title || 'Transcript'}
+        {selectedVideo?.title || t('app.transcriptFallbackTitle')}
       </span>
-      <button class="icon-btn-sm" aria-label="Close transcript" onclick={() => (transcriptOpen = false)}>
+      <button class="icon-btn-sm" aria-label={t('app.closeTranscript')} onclick={() => (transcriptOpen = false)}>
         <X size={16} />
       </button>
     </div>
@@ -410,7 +410,7 @@
         <h3 id="modal-title">{confirmModal.title}</h3>
         <p>{confirmModal.body}</p>
         <div class="modal-actions">
-          <button class="secondary" onclick={() => (confirmModal = null)}>Cancel</button>
+          <button class="secondary" onclick={() => (confirmModal = null)}>{t('common.cancel')}</button>
           {#if confirmModal.extraLabel}
             <button class="danger" onclick={() => runConfirm('extra')}>{confirmModal.extraLabel}</button>
           {/if}

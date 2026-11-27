@@ -1,6 +1,7 @@
 <script>
   import { ExternalLink, Copy, Check } from 'lucide-svelte';
   import { formatTime, timestampUrl, copyText } from '../format.js';
+  import { t } from '../i18n/index.js';
 
   let { transcript = [], video = null, videoId = '' } = $props();
 
@@ -42,23 +43,23 @@
   {#if transcript.length > 0}
     <div class="panel-header">
       <span class="count">
-        {filtered.length}{filter.trim() ? ` / ${transcript.length}` : ''} lines
+        {t('transcript.lines', { shown: filtered.length, total: transcript.length, hasFilter: !!filter.trim() })}
         {#if video?.subtitle_type}
           · {video.subtitle_type} {video.subtitle_language}
         {/if}
       </span>
       <button class="link" type="button" onclick={copyAll}>
-        {copiedMs === -2 ? 'Copied' : 'Copy all'}
+        {copiedMs === -2 ? t('transcript.copied') : t('transcript.copyAll')}
       </button>
     </div>
-    <input class="filter" type="text" bind:value={filter} placeholder="Filter this transcript..." />
+    <input class="filter" type="text" bind:value={filter} placeholder={t('transcript.filterPlaceholder')} />
   {/if}
 
   <div class="transcript-list">
     {#if transcript.length === 0}
-      <p class="empty">Select a video to read its transcript.</p>
+      <p class="empty">{t('transcript.selectVideo')}</p>
     {:else if filtered.length === 0}
-      <p class="empty">No lines match "{filter}".</p>
+      <p class="empty">{t('transcript.noLinesMatch', filter)}</p>
     {:else}
       {#each filtered as segment (segment.start_ms)}
         <div class="segment">
@@ -67,10 +68,10 @@
           </button>
           <span class="text">{segment.text}</span>
           <div class="actions">
-            <button type="button" title="Open" onclick={() => open(segment.start_ms)}>
+            <button type="button" title={t('transcript.open')} onclick={() => open(segment.start_ms)}>
               <ExternalLink size={12} />
             </button>
-            <button type="button" title="Copy link" onclick={() => copyLink(segment.start_ms)}>
+            <button type="button" title={t('transcript.copyLinkTooltip')} onclick={() => copyLink(segment.start_ms)}>
               {#if copiedMs === segment.start_ms}<Check size={12} />{:else}<Copy size={12} />{/if}
             </button>
           </div>

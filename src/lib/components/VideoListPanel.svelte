@@ -1,6 +1,7 @@
 <script>
   import { RefreshCw, X } from 'lucide-svelte';
   import { formatDuration, formatUploadDate } from '../format.js';
+  import { t } from '../i18n/index.js';
 
   let {
     videos = [],
@@ -36,30 +37,30 @@
 
 <div class="video-list">
   <div class="list-header">
-    <span class="label">Videos ({videos.length})</span>
+    <span class="label">{t('videoList.videosLabel', videos.length)}</span>
     {#if videos.length > 0}
       <div class="header-actions">
         <button
           class="link"
           type="button"
           disabled={busy}
-          title="Refetch every stored video"
+          title={t('videoList.refetchAllTooltip')}
           onclick={() => onrefetchAll?.()}
-        >Refetch all</button>
-        <button class="link danger" type="button" onclick={() => ondeleteAll?.()}>Clear</button>
+        >{t('videoList.refetchAll')}</button>
+        <button class="link danger" type="button" onclick={() => ondeleteAll?.()}>{t('videoList.clear')}</button>
       </div>
     {/if}
   </div>
 
   {#if videos.length > 8}
-    <input class="filter" type="text" bind:value={filter} placeholder="Filter videos..." />
+    <input class="filter" type="text" bind:value={filter} placeholder={t('videoList.filterPlaceholder')} />
   {/if}
 
   <ul class="video-items">
     {#if videos.length === 0}
-      <li class="empty">No videos yet. Paste a channel or playlist above.</li>
+      <li class="empty">{t('videoList.noVideosYet')}</li>
     {:else if filtered.length === 0}
-      <li class="empty">Nothing matches "{filter}".</li>
+      <li class="empty">{t('videoList.nothingMatches', filter)}</li>
     {:else}
       {#each visible as video (video.id)}
         <li class:active={video.id === selectedVideoId}>
@@ -70,8 +71,8 @@
             <span class="video-meta">
               <span class="pill" class:auto={video.subtitle_type === 'auto'} class:none={video.subtitle_type === 'none'}>
                 {video.subtitle_type === 'none'
-                  ? 'no captions'
-                  : `${video.subtitle_type} · ${video.subtitle_language}`}
+                  ? t('videoList.noCaptions')
+                  : t('videoList.subtitleInfo', video.subtitle_type, video.subtitle_language)}
               </span>
               {#if video.duration}<span>{formatDuration(video.duration)}</span>{/if}
               {#if video.upload_date}<span>{formatUploadDate(video.upload_date)}</span>{/if}
@@ -80,20 +81,20 @@
           <div class="row-actions">
             <button
               type="button"
-              title="Refetch captions"
+              title={t('videoList.refetchCaptions')}
               disabled={busy}
               onclick={() => onrefetch?.(video.id)}
             >
               <RefreshCw size={12} />
             </button>
-            <button type="button" title="Remove" onclick={() => ondelete?.(video.id)}>
+            <button type="button" title={t('videoList.remove')} onclick={() => ondelete?.(video.id)}>
               <X size={13} />
             </button>
           </div>
         </li>
       {/each}
       {#if hiddenCount > 0}
-        <li class="more">+{hiddenCount} more — use the filter to narrow down</li>
+        <li class="more">{t('videoList.moreHidden', hiddenCount)}</li>
       {/if}
     {/if}
   </ul>
@@ -101,14 +102,14 @@
   {#if missing.length > 0}
     <div class="missing-section">
       <div class="list-header">
-        <span class="label">No captions ({missing.length})</span>
+        <span class="label">{t('videoList.missingLabel', missing.length)}</span>
         <button
           class="link"
           type="button"
           disabled={busy}
-          title="Uploaders sometimes add captions later"
+          title={t('videoList.retryMissingTooltip')}
           onclick={() => onretryMissing?.()}
-        >Retry</button>
+        >{t('videoList.retry')}</button>
       </div>
       <ul class="missing-items">
         {#each missing.slice(0, 50) as video}
