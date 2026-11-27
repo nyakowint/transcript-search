@@ -39,7 +39,7 @@ WITH single AS MATERIALIZED (
     SELECT rowid AS id FROM segments_fts WHERE segments_fts MATCH :q
 ),
 windowed AS MATERIALIZED (
-    SELECT rowid AS id, bm25(windows_fts) AS score
+    SELECT rowid AS id, rank AS score
     FROM windows_fts WHERE windows_fts MATCH :q
 ),
 hits AS (
