@@ -354,6 +354,15 @@ class StoreTests(unittest.TestCase):
         self.assertEqual([v["id"] for v in result["videos"]], ["v1", "v2"])
         self.assertEqual(result["videos"][0]["hit_count"], 2)
 
+    def test_relevance_uses_best_match_instead_of_hit_count(self):
+        self.add_video("strong", ("target target target",))
+        self.add_video("weak", ("target filler filler filler filler",) * 2)
+        relevance = self.store.search("target")
+        by_hits = self.store.search("target", sort="hits")
+        self.assertEqual([v["id"] for v in relevance["videos"]], ["strong", "weak"])
+        self.assertEqual([v["id"] for v in by_hits["videos"]], ["weak", "strong"])
+        self.assertEqual((relevance["total_videos"], relevance["total_hits"]), (2, 3))
+
     def test_hits_carry_the_cue_before_them(self):
         self.add_video(texts=("lead in", "the target"))
         hit = self.store.search("target")["videos"][0]["hits"][0]
