@@ -111,6 +111,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/download-artifact@v4
         with:
@@ -123,26 +125,35 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag="build-${{ github.run_number }}-$(git rev-parse --short HEAD)"
+          sha=$(git rev-parse --short HEAD)
+          date=$(git show -s --format=%cd --date=format:%Y.%m.%d HEAD)
+          tag="v$date-$sha"
           ls -la release
+
+          # Changes since the last pre-release, or since the previous push if there is none
+          if previous=$(git describe --tags --abbrev=0 --match 'v*' --match 'build-*' HEAD 2>/dev/null); then
+            range="$previous..HEAD"
+          else
+            range="${{ github.event.before }}..HEAD"
+          fi
+
+          {
+            echo "Automatic unsigned build, so you might get a smartscreen/gatekeeper warning"
+            echo
+            echo "## Changes"
+            echo
+            git log --no-merges --format='- %s (%h)' "$range"
+            echo
+            echo "| File | Platform |"
+            echo "| --- | --- |"
+            echo "| \`transcript-search-windows-x64.exe\` | Windows 10/11 x64 |"
+            echo "| \`transcript-search-macos-arm64.app.tar.gz\` | macOS, Apple Silicon |"
+            echo "| \`transcript-search-macos-x64.app.tar.gz\` | macOS, Intel |"
+            echo "| \`transcript-search-linux-x64\` | Linux x64, glibc 2.35+ |"
+          } > notes.md
+
           gh release create "$tag" release/* \
             --prerelease \
             --target "$GITHUB_SHA" \
-            --title "Build ${{ github.run_number }} ($(git rev-parse --short HEAD))" \
-            --notes "$(cat <<'EOF'
-          Automatic unsigned build, so you might get a smartscreen/gatekeeper warning
-
-          | File | Platform |
-          | --- | --- |
-          | `transcript-search-windows-x64.exe` | Windows 10/11 x64 |
-          | `transcript-search-macos-arm64.app.tar.gz` | macOS, Apple Silicon |
-          | `transcript-search-macos-x64.app.tar.gz` | macOS, Intel |
-          | `transcript-search-linux-x64` | Linux x64, glibc 2.35+ |
-
-          **macOS:** `xattr -dr com.apple.quarantine "Transcript Search.app"` after
-          unpacking, otherwise Gatekeeper refuses an unsigned app.
-
-          **Linux:** `chmod +x transcript-search-linux-x64`. Needs GTK 3 and
-          WebKit2GTK 4.0 installed (`libwebkit2gtk-4.0-37` on Debian/Ubuntu).
-          EOF
-          )"
+            --title "$tag" \
+            --notes-file notes.md

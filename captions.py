@@ -42,9 +42,16 @@ def _rank_language(code: str, preferred: Iterable[str]) -> Optional[int]:
     return None
 
 
+def _is_translation(fmt: dict) -> bool:
+    return "tlang=" in fmt.get("url", "")
+
+
 def _best_format(formats: list[dict]) -> Optional[dict]:
+    # Multi-language ASR videos list one auto track per spoken language under
+    # each target language, e.g. "en" holds ar->en, bn->en, ... and the native
+    # en track. Translations are lower quality and rate limited without cookies.
     by_ext = {}
-    for fmt in formats or []:
+    for fmt in sorted(formats or [], key=_is_translation):
         ext = (fmt.get("ext") or "").lower()
         if ext and ext not in by_ext and fmt.get("url"):
             by_ext[ext] = fmt

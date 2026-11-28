@@ -13,6 +13,7 @@ here:
 
 from __future__ import annotations
 
+import http.cookiejar
 import json
 import subprocess
 import sys
@@ -70,7 +71,6 @@ class IngestOptions:
         skip_existing: bool = True,
         max_videos: int = 0,
         cookies_path: str = "",
-        cookies_browser: str = "",
     ) -> None:
         self.preferred_languages = [
             code.strip() for code in preferred_languages if str(code).strip()
@@ -85,7 +85,6 @@ class IngestOptions:
         self.skip_existing = skip_existing
         self.max_videos = max(0, int(max_videos))
         self.cookies_path = cookies_path or ""
-        self.cookies_browser = cookies_browser or ""
 
     @classmethod
     def from_dict(cls, data: dict | None) -> "IngestOptions":
@@ -103,7 +102,6 @@ class IngestOptions:
             skip_existing=bool(data.get("skip_existing", True)),
             max_videos=data.get("max_videos", 0),
             cookies_path=data.get("cookies_path", ""),
-            cookies_browser=data.get("cookies_browser", ""),
         )
 
     def to_dict(self) -> dict:
@@ -135,6 +133,19 @@ class Ingestor:
         self._on_event = on_event or (lambda event: None)
         self._processes: set[subprocess.Popen] = set()
         self._proc_lock = threading.Lock()
+        self._caption_opener = self._build_caption_opener()
+
+    def _build_caption_opener(self) -> urllib.request.OpenerDirector:
+        # Timedtext rate limits anonymous requests far harder than yt-dlp's
+        # own traffic, so reuse the user's cookies file for caption downloads.
+        if not self.options.cookies_path:
+            return urllib.request.build_opener()
+        jar = http.cookiejar.MozillaCookieJar(self.options.cookies_path)
+        try:
+            jar.load(ignore_discard=True, ignore_expires=True)
+        except (OSError, http.cookiejar.LoadError):
+            return urllib.request.build_opener()
+        return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
 
     # ------------------------------------------------------------- lifecycle
 
@@ -169,8 +180,6 @@ class Ingestor:
         args = [self._ytdlp, "--no-warnings", "--ignore-config", "--no-progress"]
         if self.options.cookies_path:
             args += ["--cookies", self.options.cookies_path]
-        if self.options.cookies_browser:
-            args += ["--cookies-from-browser", self.options.cookies_browser]
         return args
 
     def _stream_json_lines(
@@ -406,7 +415,7 @@ class Ingestor:
             track["url"],
             headers={"User-Agent": _CAPTION_UA, "Accept-Language": "en-US,en;q=0.9"},
         )
-        with urllib.request.urlopen(request, timeout=CAPTION_TIMEOUT) as response:
+        with self._caption_opener.open(request, timeout=CAPTION_TIMEOUT) as response:
             payload = response.read()
         return parse_caption_payload(payload, track["ext"])
 

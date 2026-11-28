@@ -412,7 +412,6 @@
     <Modal title={t('app.settingsTitle')} onclose={() => (settingsOpen = false)}>
       <CookiesPanel
         cookiesPath={settings.cookies_path || ''}
-        cookiesBrowser={settings.cookies_browser || ''}
         onchange={updateSettings}
         onbrowse={browseCookies}
       />

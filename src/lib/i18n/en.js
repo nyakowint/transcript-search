@@ -48,22 +48,10 @@ export default {
   },
 
   cookies: {
-    browsers: {
-      none: 'None',
-      chrome: 'Chrome',
-      edge: 'Edge',
-      firefox: 'Firefox',
-      brave: 'Brave',
-      vivaldi: 'Vivaldi',
-      opera: 'Opera',
-      chromium: 'Chromium',
-      safari: 'Safari',
-    },
     hint: 'Only needed for age-restricted, members-only, or rate-limited fetches.',
     fileLabel: 'Cookies file',
     filePlaceholder: 'Path to cookies.txt',
     browse: 'Browse',
-    browserLabel: 'Or read cookies from a browser',
   },
 
   ingest: {

@@ -69,6 +69,16 @@ class TrackSelectionTests(unittest.TestCase):
         }
         self.assertEqual(select_track(subtitles, {}, ("en",))["ext"], "json3")
 
+    def test_prefers_native_track_over_translation(self):
+        auto = {
+            "en": [
+                {"ext": "json3", "url": "https://example.test/?lang=ar&tlang=en"},
+                {"ext": "json3", "url": "https://example.test/?lang=en"},
+            ]
+        }
+        chosen = select_track({}, auto, ("en",))
+        self.assertEqual(chosen["url"], "https://example.test/?lang=en")
+
 
 class Json3ParsingTests(unittest.TestCase):
     def test_parses_events(self):

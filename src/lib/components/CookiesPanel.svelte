@@ -1,23 +1,7 @@
 <script>
   import { t } from '../i18n/index.js';
 
-  let { cookiesPath = '', cookiesBrowser = '', onchange, onbrowse } = $props();
-
-  const browsers = [
-    { label: t('cookies.browsers.none'), value: '' },
-    { label: t('cookies.browsers.chrome'), value: 'chrome' },
-    { label: t('cookies.browsers.edge'), value: 'edge' },
-    { label: t('cookies.browsers.firefox'), value: 'firefox' },
-    { label: t('cookies.browsers.brave'), value: 'brave' },
-    { label: t('cookies.browsers.vivaldi'), value: 'vivaldi' },
-    { label: t('cookies.browsers.opera'), value: 'opera' },
-    { label: t('cookies.browsers.chromium'), value: 'chromium' },
-    { label: t('cookies.browsers.safari'), value: 'safari' },
-  ];
-
-  function emit(patch) {
-    onchange?.({ cookies_path: cookiesPath, cookies_browser: cookiesBrowser, ...patch });
-  }
+  let { cookiesPath = '', onchange, onbrowse } = $props();
 </script>
 
 <div class="cookies">
@@ -31,23 +15,11 @@
         id="cookies-path"
         type="text"
         bind:value={cookiesPath}
-        onchange={() => emit({ cookies_path: cookiesPath })}
+        onchange={() => onchange?.({ cookies_path: cookiesPath })}
         placeholder={t('cookies.filePlaceholder')}
       />
       <button class="secondary" type="button" onclick={() => onbrowse?.()}>{t('cookies.browse')}</button>
     </div>
-  </div>
-  <div class="field">
-    <label for="cookies-browser">{t('cookies.browserLabel')}</label>
-    <select
-      id="cookies-browser"
-      bind:value={cookiesBrowser}
-      onchange={() => emit({ cookies_browser: cookiesBrowser })}
-    >
-      {#each browsers as browser}
-        <option value={browser.value}>{browser.label}</option>
-      {/each}
-    </select>
   </div>
 </div>
 
@@ -72,8 +44,7 @@
     margin-bottom: 4px;
   }
 
-  .field input,
-  .field select {
+  .field input {
     width: 100%;
     padding: 8px 12px;
     border-radius: 8px;

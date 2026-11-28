@@ -27,7 +27,6 @@ from ytdlp_url import CHANNEL_TABS, Target
 
 SETTING_KEYS = (
     "cookies_path",
-    "cookies_browser",
     "preferred_languages",
     "allow_auto",
     "allow_other_languages",
@@ -39,7 +38,6 @@ SETTING_KEYS = (
 
 DEFAULT_SETTINGS = {
     "cookies_path": "",
-    "cookies_browser": "",
     "preferred_languages": "en",
     "allow_auto": "1",
     "allow_other_languages": "1",
@@ -294,7 +292,6 @@ class Api:
             skip_existing=as_bool(raw["skip_existing"]),
             max_videos=as_int(raw["max_videos"], 0),
             cookies_path=self._normalize_path(str(raw["cookies_path"])),
-            cookies_browser=str(raw["cookies_browser"]).strip(),
         )
 
     # ------------------------------------------------------------------ jobs
